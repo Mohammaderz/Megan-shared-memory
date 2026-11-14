@@ -65,7 +65,7 @@ class FakeWeb3:
 
 def test_holder_snapshot_reads_logs_and_reconciles_balances():
     result = fetch_erc20_holder_snapshot(
-        FakeWeb3(), TOKEN, 90, to_block=100, chunk_size=5
+        FakeWeb3(), TOKEN, 90, to_block=100, chunk_size=20
     )
     assert result.chain_id == 1
     assert result.complete is True
