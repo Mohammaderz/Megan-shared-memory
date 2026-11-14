@@ -7,6 +7,7 @@
 - [اتصال منابع عمومی بازار](src/public_sources.py): GeckoTerminal، DEX Screener و Honeypot.is.
 - [موتور ارزیابی ریسک](src/risk_engine.py): امتیاز ریسک و فرصت، موانع سخت، هشدارها و داده‌های نامعلوم.
 - [تحلیل وضعیت LP](src/lp_analysis.py): تفکیک توکن‌های LP قفل‌شده، آزاد، سوزانده‌شده و نگهداری‌شده در قراردادهای ناشناخته؛ فقط با snapshot کامل و lock record تأییدشده. این ماژول فعلاً تحلیل‌گر داده ورودی است و هنوز به RPC/locker registry متصل نشده است.
+- [تحلیل هولدرها](src/holder_analysis.py): محاسبه تمرکز ۱۰ هولدر بر اساس snapshot کامل و قابل تطبیق با totalSupply؛ تفکیک burn، جفت‌ارز LP و locker تأییدشده از عرضه در گردش. این ماژول هنوز به گردآوری زنده Transfer logs و balanceOf متصل نشده است.
 - [اسکنر پژوهش](src/megan_research.py): کشف استخرهای تازه Ethereum، دریافت داده‌های بازار و ذخیره گزارش در SQLite.
 - [آزمون‌ها](tests/) و [GitHub Actions](.github/workflows/python-tests.yml).
 
