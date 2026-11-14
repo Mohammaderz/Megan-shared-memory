@@ -59,6 +59,8 @@ def classify_lp_supply(
     address's observed balance. Expired locks are treated as unlocked.
     """
     warnings: list[str] = []
+    if not locks_complete:
+        warnings.append("locker_registry_incomplete")
     if total_supply_raw <= 0 or snapshot_timestamp < 0:
         return _unknown(total_supply_raw, "invalid_supply_or_snapshot")
 
@@ -86,7 +88,6 @@ def classify_lp_supply(
     # An incomplete locker registry must never turn contract-held LP into unlocked LP.
 
     locked_by_address: dict[str, int] = {}
-    expiry_by_address: dict[str, list[int]] = {}
     for lock in lock_rows:
         address = lock.locker_address.lower()
         if not lock.verified:
@@ -96,7 +97,6 @@ def classify_lp_supply(
         if kinds.get(address) != "contract":
             return _unknown(total_supply_raw, "lock_address_not_verified_contract_holder")
         locked_by_address[address] = locked_by_address.get(address, 0) + lock.amount_raw
-        expiry_by_address.setdefault(address, []).append(lock.unlock_timestamp)
 
     locked = 0
     unlocked = 0
