@@ -62,7 +62,7 @@ def scan_once(db: ResearchDB) -> int:
             evidence.simulation_buy_ok=simulation.get("buyTax") is not None if simulation else None
             evidence.buy_tax_pct=_float(simulation.get("buyTax"))
             evidence.sell_tax_pct=_float(simulation.get("sellTax"))
-            evidence.notes.append("Honeypot.is response captured; sell simulation fields require provider-schema validation")
+            evidence.notes.append("Honeypot.is response captured; explicit buy/sell simulation success remains UNKNOWN until schema is validated")
         except (SourceError,ValueError) as exc:
             evidence.notes.append("Honeypot check unavailable: "+str(exc))
         report=assess(evidence)
