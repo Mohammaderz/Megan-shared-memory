@@ -1,0 +1,346 @@
+"""Megan Ethereum watcher: discover newly deployed ERC-20-like contracts and DEX pools.
+
+This is an observation-only MVP. It never signs or sends transactions.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import signal
+import sqlite3
+import time
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+from web3 import Web3
+
+LOG = logging.getLogger("megan")
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+SELECTORS = {
+    "name": "0x06fdde03",
+    "symbol": "0x95d89b41",
+    "decimals": "0x313ce567",
+    "total_supply": "0x18160ddd",
+    "owner": "0x8da5cb5b",
+}
+V2_EVENT = Web3.keccak(text="PairCreated(address,address,address,uint256)").hex()
+V3_EVENT = Web3.keccak(text="PoolCreated(address,address,uint24,int24,address)").hex()
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def env_addresses(key: str) -> list[str]:
+    raw = os.getenv(key, "")
+    values = [part.strip() for part in raw.split(",") if part.strip()]
+    result = []
+    for value in values:
+        if not Web3.is_address(value):
+            raise ValueError(f"Invalid address in {key}: {value}")
+        result.append(Web3.to_checksum_address(value))
+    return result
+
+
+def decode_text(data: bytes) -> str | None:
+    """Decode ABI string, falling back to bytes32 for legacy ERC-20 metadata."""
+    if not data:
+        return None
+    try:
+        offset = int.from_bytes(data[:32], "big")
+        if offset + 32 <= len(data):
+            size = int.from_bytes(data[offset:offset + 32], "big")
+            raw = data[offset + 32:offset + 32 + size]
+            if size <= len(data) and raw:
+                return raw.decode("utf-8", errors="replace").rstrip("\x00")
+    except (ValueError, UnicodeDecodeError):
+        pass
+    try:
+        return data[:32].split(b"\x00", 1)[0].decode("utf-8", errors="replace") or None
+    except UnicodeDecodeError:
+        return None
+
+
+def decode_uint(data: bytes) -> int | None:
+    return int.from_bytes(data[-32:], "big") if len(data) >= 32 else None
+
+
+@dataclass
+class TokenRecord:
+    address: str
+    creator: str | None
+    creation_tx: str
+    block_number: int
+    block_hash: str
+    observed_at: str
+    name: str | None
+    symbol: str | None
+    decimals: int | None
+    total_supply_raw: str | None
+    owner: str | None
+    bytecode_bytes: int
+    metadata_complete: bool
+
+
+class Store:
+    def __init__(self, path: str):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(path)
+        self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tokens (
+          address TEXT PRIMARY KEY, creator TEXT, creation_tx TEXT NOT NULL,
+          block_number INTEGER NOT NULL, block_hash TEXT NOT NULL, observed_at TEXT NOT NULL,
+          name TEXT, symbol TEXT, decimals INTEGER, total_supply_raw TEXT, owner TEXT,
+          bytecode_bytes INTEGER NOT NULL, metadata_complete INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pools (
+          address TEXT PRIMARY KEY, dex_type TEXT NOT NULL, factory TEXT NOT NULL,
+          token0 TEXT NOT NULL, token1 TEXT NOT NULL, fee TEXT, block_number INTEGER NOT NULL,
+          tx_hash TEXT NOT NULL, observed_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS raw_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, block_number INTEGER NOT NULL,
+          block_hash TEXT NOT NULL, tx_hash TEXT NOT NULL, log_index INTEGER,
+          event_type TEXT NOT NULL, payload_json TEXT NOT NULL, observed_at TEXT NOT NULL,
+          UNIQUE(block_hash, tx_hash, log_index, event_type)
+        );
+        """)
+        self.db.commit()
+
+    def get_state(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        self.db.execute("INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+        self.db.commit()
+
+    def add_token(self, token: TokenRecord) -> bool:
+        values = asdict(token)
+        values["metadata_complete"] = int(values["metadata_complete"])
+        cur = self.db.execute("""
+          INSERT OR IGNORE INTO tokens(address,creator,creation_tx,block_number,block_hash,observed_at,
+          name,symbol,decimals,total_supply_raw,owner,bytecode_bytes,metadata_complete)
+          VALUES(:address,:creator,:creation_tx,:block_number,:block_hash,:observed_at,
+          :name,:symbol,:decimals,:total_supply_raw,:owner,:bytecode_bytes,:metadata_complete)
+        """, values)
+        self.db.commit()
+        return cur.rowcount == 1
+
+    def add_pool(self, pool: dict[str, Any]) -> bool:
+        cur = self.db.execute("""
+          INSERT OR IGNORE INTO pools(address,dex_type,factory,token0,token1,fee,block_number,tx_hash,observed_at)
+          VALUES(:address,:dex_type,:factory,:token0,:token1,:fee,:block_number,:tx_hash,:observed_at)
+        """, pool)
+        self.db.commit()
+        return cur.rowcount == 1
+
+    def add_event(self, block: int, block_hash: str, tx_hash: str, log_index: int | None,
+                  event_type: str, payload: dict[str, Any], observed_at: str) -> None:
+        self.db.execute("""
+          INSERT OR IGNORE INTO raw_events(block_number,block_hash,tx_hash,log_index,event_type,payload_json,observed_at)
+          VALUES(?,?,?,?,?,?,?)
+        """, (block, block_hash, tx_hash, log_index, event_type, json.dumps(payload, ensure_ascii=False), observed_at))
+        self.db.commit()
+
+    def close(self) -> None:
+        self.db.close()
+
+
+class EthereumWatcher:
+    def __init__(self, rpc_url: str, db_path: str, poll_seconds: float,
+                 confirmations: int, start_block: int | None,
+                 v2_factories: list[str], v3_factories: list[str]):
+        self.w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 25}))
+        if not self.w3.is_connected():
+            raise ConnectionError("RPC endpoint is not reachable")
+        self.chain_id = self.w3.eth.chain_id
+        if self.chain_id != 1:
+            raise ValueError(f"Expected Ethereum mainnet chain_id=1, got {self.chain_id}")
+        self.store = Store(db_path)
+        self.poll_seconds = poll_seconds
+        self.confirmations = confirmations
+        self.start_block = start_block
+        self.v2_factories = v2_factories
+        self.v3_factories = v3_factories
+        self.running = True
+
+    def stop(self, *_: Any) -> None:
+        self.running = False
+
+    def call(self, address: str, selector: str, block: int) -> bytes:
+        return bytes(self.w3.eth.call({"to": address, "data": selector}, block_identifier=block))
+
+    def inspect_token(self, address: str, creator: str | None, tx_hash: str,
+                      block_number: int, block_hash: str) -> TokenRecord | None:
+        try:
+            bytecode = bytes(self.w3.eth.get_code(address, block_identifier=block_number))
+            if not bytecode:
+                return None
+            values: dict[str, Any] = {}
+            for key in ("name", "symbol", "decimals", "total_supply", "owner"):
+                try:
+                    raw = self.call(address, SELECTORS[key], block_number)
+                    if key in ("name", "symbol"):
+                        values[key] = decode_text(raw)
+                    elif key == "owner":
+                        values[key] = Web3.to_checksum_address("0x" + raw[-20:].hex()) if len(raw) >= 32 else None
+                    else:
+                        values[key] = decode_uint(raw)
+                except Exception:
+                    values[key] = None
+            # ERC-20-like heuristic: at least two identity/quantity methods must respond.
+            evidence_count = sum(values.get(k) is not None for k in ("name", "symbol", "decimals", "total_supply"))
+            if evidence_count < 2:
+                return None
+            return TokenRecord(
+                address=Web3.to_checksum_address(address), creator=creator, creation_tx=tx_hash,
+                block_number=block_number, block_hash=block_hash, observed_at=utc_now(),
+                name=values.get("name"), symbol=values.get("symbol"),
+                decimals=values.get("decimals"), total_supply_raw=str(values["total_supply"]) if values.get("total_supply") is not None else None,
+                owner=values.get("owner"), bytecode_bytes=len(bytecode),
+                metadata_complete=all(values.get(k) is not None for k in ("name", "symbol", "decimals", "total_supply")),
+            )
+        except Exception:
+            LOG.exception("Token inspection failed for %s", address)
+            return None
+
+    def scan_deployments(self, block: Any) -> int:
+        discovered = 0
+        for tx in block["transactions"]:
+            if tx.get("to") is not None:
+                continue
+            tx_hash = tx["hash"].hex()
+            try:
+                receipt = self.w3.eth.get_transaction_receipt(tx["hash"])
+                address = receipt.get("contractAddress")
+                if int(receipt["status"]) != 1 or not address:
+                    continue
+                token = self.inspect_token(address, tx.get("from"), tx_hash, block["number"], block["hash"].hex())
+                if token and self.store.add_token(token):
+                    discovered += 1
+                    LOG.info("NEW TOKEN %s (%s) at block %s", token.address, token.symbol or "?", block["number"])
+                    self.store.add_event(block["number"], block["hash"].hex(), tx_hash, None,
+                                         "token_discovered", asdict(token), utc_now())
+            except Exception:
+                LOG.exception("Could not inspect contract creation tx %s", tx_hash)
+        return discovered
+
+    def scan_factory_logs(self, block_number: int, block_hash: str) -> int:
+        found = 0
+        for dex_type, factories, topic in (
+            ("uniswap_v2_style", self.v2_factories, V2_EVENT),
+            ("uniswap_v3_style", self.v3_factories, V3_EVENT),
+        ):
+            for factory in factories:
+                try:
+                    logs = self.w3.eth.get_logs({
+                        "fromBlock": block_number, "toBlock": block_number,
+                        "address": factory, "topics": [topic],
+                    })
+                    for item in logs:
+                        topics = item["topics"]
+                        token0 = Web3.to_checksum_address("0x" + topics[1].hex()[-40:])
+                        token1 = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
+                        if dex_type == "uniswap_v2_style":
+                            decoded = self.w3.codec.decode(["address", "uint256"], bytes(item["data"]))
+                            pool_address, fee = Web3.to_checksum_address(decoded[0]), None
+                        else:
+                            decoded = self.w3.codec.decode(["uint24", "int24", "address"], bytes(item["data"]))
+                            fee, pool_address = str(decoded[0]), Web3.to_checksum_address(decoded[2])
+                        record = {
+                            "address": pool_address, "dex_type": dex_type, "factory": factory,
+                            "token0": token0, "token1": token1, "fee": fee,
+                            "block_number": block_number, "tx_hash": item["transactionHash"].hex(),
+                            "observed_at": utc_now(),
+                        }
+                        if self.store.add_pool(record):
+                            found += 1
+                            LOG.info("NEW POOL %s %s/%s at block %s", pool_address, token0, token1, block_number)
+                        self.store.add_event(block_number, block_hash, item["transactionHash"].hex(),
+                                             int(item["logIndex"]), "pool_created", record, utc_now())
+                except Exception:
+                    LOG.exception("Factory scan failed: %s at block %s", factory, block_number)
+        return found
+
+    def run(self) -> None:
+        cursor = self.store.get_state("last_processed_block")
+        if cursor is not None:
+            next_block = int(cursor) + 1
+        elif self.start_block is not None:
+            next_block = self.start_block
+        else:
+            next_block = self.w3.eth.block_number
+        LOG.info("Megan watcher online | chain_id=%s | starting_block=%s | confirmations=%s",
+                 self.chain_id, next_block, self.confirmations)
+        while self.running:
+            try:
+                safe_tip = max(0, self.w3.eth.block_number - self.confirmations)
+                while self.running and next_block <= safe_tip:
+                    block = self.w3.eth.get_block(next_block, full_transactions=True)
+                    block_hash = block["hash"].hex()
+                    # Persist progress only after both discovery passes complete.
+                    token_count = self.scan_deployments(block)
+                    pool_count = self.scan_factory_logs(next_block, block_hash)
+                    self.store.set_state("last_processed_block", str(next_block))
+                    LOG.info("BLOCK %s processed | new_tokens=%s | new_pools=%s",
+                             next_block, token_count, pool_count)
+                    next_block += 1
+            except Exception:
+                LOG.exception("Polling cycle failed; cursor retained for retry")
+            time.sleep(self.poll_seconds)
+
+    def close(self) -> None:
+        self.store.close()
+
+
+def main() -> int:
+    load_dotenv()
+    parser = argparse.ArgumentParser(description="Megan Ethereum token and pool discovery MVP")
+    parser.add_argument("--start-block", type=int, default=int(os.environ["START_BLOCK"]) if os.getenv("START_BLOCK") else None,
+                        help="First block to scan on first run; otherwise starts at current tip")
+    parser.add_argument("--once", action="store_true", help="Scan only the next eligible block(s), then exit")
+    args = parser.parse_args()
+
+    rpc_url = os.getenv("ETHEREUM_RPC_URL", "").strip()
+    if not rpc_url:
+        parser.error("Set ETHEREUM_RPC_URL in the environment or .env file")
+    poll_seconds = float(os.getenv("POLL_SECONDS", "2"))
+    confirmations = int(os.getenv("CONFIRMATIONS", "2"))
+    db_path = os.getenv("DATABASE_PATH", "data/megan.sqlite3")
+    v2_factories = env_addresses("V2_FACTORY_ADDRESSES")
+    v3_factories = env_addresses("V3_FACTORY_ADDRESSES")
+
+    watcher = EthereumWatcher(rpc_url, db_path, poll_seconds, confirmations,
+                              args.start_block, v2_factories, v3_factories)
+    signal.signal(signal.SIGINT, watcher.stop)
+    signal.signal(signal.SIGTERM, watcher.stop)
+    try:
+        if args.once:
+            watcher.poll_seconds = 0
+            cursor = watcher.store.get_state("last_processed_block")
+            block_number = int(cursor) + 1 if cursor else (args.start_block or watcher.w3.eth.block_number)
+            safe_tip = max(0, watcher.w3.eth.block_number - confirmations)
+            while block_number <= safe_tip:
+                block = watcher.w3.eth.get_block(block_number, full_transactions=True)
+                watcher.scan_deployments(block)
+                watcher.scan_factory_logs(block_number, block["hash"].hex())
+                watcher.store.set_state("last_processed_block", str(block_number))
+                block_number += 1
+            return 0
+        watcher.run()
+        return 0
+    finally:
+        watcher.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
