@@ -4,7 +4,7 @@ import argparse, json, logging, os, sqlite3, time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from public_sources import geckoterminal_new_pools, dexscreener_token_pairs, honeypot_check, extract_pool_metrics, SourceError
+from public_sources import geckoterminal_new_pools, dexscreener_token_pairs, honeypot_check, extract_pool_metrics, parse_honeypot_evidence, SourceError
 from risk_engine import RiskEvidence, assess
 
 LOG = logging.getLogger("megan.research")
@@ -56,13 +56,17 @@ def scan_once(db: ResearchDB) -> int:
         # Honeypot endpoint is attempted, but absence/failure remains UNKNOWN.
         try:
             hp=honeypot_check(address)
-            result=hp.get("honeypotResult") or {}
-            evidence.honeypot=result.get("isHoneypot") if isinstance(result.get("isHoneypot"),bool) else None
-            simulation=hp.get("simulationResult") or {}
-            evidence.simulation_buy_ok=simulation.get("buyTax") is not None if simulation else None
-            evidence.buy_tax_pct=_float(simulation.get("buyTax"))
-            evidence.sell_tax_pct=_float(simulation.get("sellTax"))
-            evidence.notes.append("Honeypot.is response captured; explicit buy/sell simulation success remains UNKNOWN until schema is validated")
+            parsed = parse_honeypot_evidence(hp)
+            evidence.honeypot = parsed["honeypot"]
+            evidence.simulation_buy_ok = parsed["simulation_buy_ok"]
+            evidence.simulation_sell_ok = parsed["simulation_sell_ok"]
+            evidence.buy_tax_pct = parsed["buy_tax_pct"]
+            evidence.sell_tax_pct = parsed["sell_tax_pct"]
+            evidence.notes.append(
+                "Honeypot.is evidence captured; simulationSuccess="
+                + str(parsed["simulation_success"])
+                + " records provider simulation status only; directional buy/sell success remains UNKNOWN"
+            )
         except (SourceError,ValueError) as exc:
             evidence.notes.append("Honeypot check unavailable: "+str(exc))
         report=assess(evidence)
