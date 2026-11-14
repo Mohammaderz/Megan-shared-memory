@@ -22,6 +22,9 @@ class FakeEth:
     def get_code(self, address, block_identifier=None):
         return b"locker-code"
 
+    def get_storage_at(self, address, slot, block_identifier=None):
+        return bytes(32)
+
     def call(self, tx, block_identifier=None):
         if tx["data"].startswith("0x11111111"):
             return (1).to_bytes(32, "big")
@@ -89,3 +92,16 @@ def test_v2_registry_validates_chain_pair_and_selectors(tmp_path):
         load_v2_locker_registry(str(path), 5, PAIR, lambda value: value.lower())
     with pytest.raises(ValueError, match="pair_address"):
         load_v2_locker_registry(str(path), 1, LOCKER, lambda value: value.lower())
+
+def test_v2_eip1967_proxy_locker_is_not_trusted():
+    class ProxyEth(FakeEth):
+        def get_storage_at(self, address, slot, block_identifier=None):
+            return bytes.fromhex("00" * 12 + "99" * 20)
+    class ProxyWeb3(FakeWeb3):
+        eth = ProxyEth()
+    result = read_v2_locker_records(
+        ProxyWeb3(), PAIR, 100, (adapter(),), registry_complete=True,
+    )
+    assert result.complete is False
+    assert result.locks == ()
+    assert "eip1967_proxy_locker_not_supported" in result.warnings[0]
