@@ -71,3 +71,72 @@ def test_trace_mode_off_does_not_call_rpc():
     batch = TraceDiscovery(SimpleNamespace(provider=Provider()), "off").trace_block(123)
     assert batch.provider == "disabled"
     assert batch.creations == ()
+
+
+def _topic_address(address):
+    return bytes.fromhex(address[2:].rjust(64, "0"))
+
+
+def _word(value):
+    return int(value).to_bytes(32, "big")
+
+
+def test_decode_v2_pair_created_event():
+    from web3 import Web3
+    from megan_watcher import V2_EVENT, decode_v2_pair_created
+
+    token0 = "0x" + "11" * 20
+    token1 = "0x" + "22" * 20
+    pair = "0x" + "33" * 20
+    topics = [bytes.fromhex(V2_EVENT[2:]), _topic_address(token0), _topic_address(token1)]
+    data = bytes.fromhex(pair[2:].rjust(64, "0")) + _word(7)
+    assert decode_v2_pair_created(topics, data) == (
+        Web3.to_checksum_address(token0),
+        Web3.to_checksum_address(token1),
+        Web3.to_checksum_address(pair),
+    )
+
+
+def test_decode_v3_pool_created_event():
+    from web3 import Web3
+    from megan_watcher import V3_EVENT, decode_v3_pool_created
+
+    token0 = "0x" + "11" * 20
+    token1 = "0x" + "22" * 20
+    pool = "0x" + "33" * 20
+    fee = 3000
+    topics = [
+        bytes.fromhex(V3_EVENT[2:]),
+        _topic_address(token0),
+        _topic_address(token1),
+        _word(fee),
+    ]
+    data = _word(60) + bytes.fromhex(pool[2:].rjust(64, "0"))
+    assert decode_v3_pool_created(topics, data) == (
+        Web3.to_checksum_address(token0),
+        Web3.to_checksum_address(token1),
+        Web3.to_checksum_address(pool),
+        fee,
+    )
+
+
+def test_v2_decoder_rejects_wrong_topic_and_malformed_data():
+    import pytest
+    from megan_watcher import decode_v2_pair_created
+
+    with pytest.raises(ValueError):
+        decode_v2_pair_created([b"\\x00" * 32] * 3, b"\\x00" * 64)
+    with pytest.raises(ValueError):
+        decode_v2_pair_created([b"\\x00" * 32] * 3, b"short")
+
+
+def test_v3_decoder_rejects_invalid_fee_topic():
+    import pytest
+    from megan_watcher import V3_EVENT, decode_v3_pool_created
+
+    token0 = "0x" + "11" * 20
+    token1 = "0x" + "22" * 20
+    topics = [bytes.fromhex(V3_EVENT[2:]), _topic_address(token0),
+              _topic_address(token1), _word(1 << 32)]
+    with pytest.raises(ValueError):
+        decode_v3_pool_created(topics, _word(60) + _word(1))
