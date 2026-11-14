@@ -12,13 +12,13 @@ dependencies = [
 dev = ["pytest>=8.0,<9.0"]
 
 [project.scripts]
-megan-watch = "megan_watcher:main"
+megan-watch = "megan_watcher:main"\nmegan-research = "megan_research:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
 [tool.setuptools]
-py-modules = ["megan_watcher"]
+py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research"]
 
 [tool.setuptools.package-dir]
 "" = "src"
