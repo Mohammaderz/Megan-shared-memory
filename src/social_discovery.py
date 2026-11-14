@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 LOG = logging.getLogger("megan.socials")
 UA = "Megan-Ethereum-Research/0.2 (+read-only)"
 
@@ -282,6 +284,7 @@ def scan_once(database_path: str, limit: int = 20) -> int:
 
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Megan read-only Telegram/X link discovery")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval", type=int, default=15)
