@@ -75,7 +75,7 @@ def test_v2_code_hash_mismatch_is_not_accepted():
     )
     assert result.complete is False
     assert result.locks == ()
-    assert "locker_code_hash_mismatch_or_missing" in result.warnings[0]
+    assert "locker_code_hash_mismatch" in result.warnings[0]
 
 
 def test_v2_registry_validates_chain_pair_and_selectors(tmp_path):
