@@ -14,7 +14,8 @@ dev = ["pytest>=8.0,<9.0"]
 [project.scripts]
 megan-watch = "megan_watcher:main"
 megan-research = "megan_research:main"
-megan-holders = "megan_holders:main"\nmegan-lp = "megan_lp:main"
+megan-holders = "megan_holders:main"
+megan-lp = "megan_lp:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
