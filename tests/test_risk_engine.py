@@ -53,3 +53,26 @@ def test_complete_positive_safety_evidence_allows_higher_opportunity_score():
     ))
     assert report.opportunity_score > 5
     assert report.confidence == "high"
+def test_missing_owner_controls_and_deployer_history_prevent_high_confidence():
+    report = assess(RiskEvidence(
+        honeypot=False, simulation_buy_ok=True, simulation_sell_ok=True,
+        lp_locked_share_pct=100, liquidity_usd=50000,
+        top10_holder_share_pct=20, owner_can_mint=False,
+        owner_can_pause=False, owner_can_blacklist=False,
+        owner_can_change_tax=False, proxy_upgradeable=False,
+        deployer_supply_share_pct=1, deployer_prior_rugs=0,
+        wash_trade_suspected=False,
+    ))
+    assert report.confidence == "high"
+
+
+def test_unknown_proxy_and_deployer_history_caps_confidence():
+    report = assess(RiskEvidence(
+        honeypot=False, simulation_buy_ok=True, simulation_sell_ok=True,
+        lp_locked_share_pct=100, liquidity_usd=50000,
+        top10_holder_share_pct=20, owner_can_mint=False,
+        owner_can_pause=False, owner_can_blacklist=False,
+        owner_can_change_tax=False,
+    ))
+    assert report.confidence == "low"
+    assert report.opportunity_score <= 3
