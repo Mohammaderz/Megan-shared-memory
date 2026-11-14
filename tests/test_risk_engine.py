@@ -1,11 +1,11 @@
 from risk_engine import RiskEvidence, assess
 
-def test_unlocked_liquidity_is_a_risk_not_an_opportunity_signal():
+def test_unlocked_liquidity_is_a_risk_but_does_not_block_early_discovery():
     report=assess(RiskEvidence(lp_locked_share_pct=0,liquidity_lock_status="unlocked",liquidity_usd=30000,
         honeypot=False,simulation_sell_ok=True,owner_can_mint=False,owner_can_blacklist=False))
     assert report.risk_score >= 30
     assert "majority_liquidity_unlocked" in report.warnings
-    assert report.opportunity_score == 0
+    assert report.opportunity_score > 0
 
 def test_missing_security_evidence_reduces_confidence():
     report=assess(RiskEvidence(liquidity_usd=10000))
