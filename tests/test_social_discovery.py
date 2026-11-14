@@ -71,3 +71,52 @@ def test_telegram_group_search_results_are_not_mistaken_for_official_links():
     assert result["telegram_status"] == "group_found_by_account_search"
     assert result["telegram_groups"][0]["url"] == "https://t.me/token_discussion"
     assert result["overall_status"] == "evidence_found"
+
+
+
+def test_telegram_mtproto_search_uses_groups_only_and_returns_exact_mentions(monkeypatch):
+    import sys
+    from datetime import datetime, timezone
+    from types import ModuleType, SimpleNamespace
+
+    captured = {}
+    chat = SimpleNamespace(id=77, title="Launch group", username="launch_group", broadcast=False)
+    message = SimpleNamespace(
+        message=f"Contract: {ADDRESS}",
+        peer_id=SimpleNamespace(channel_id=77),
+        id=123,
+        date=datetime.now(timezone.utc),
+    )
+
+    class FakeClient:
+        def __init__(self, session, api_id, api_hash):
+            captured["session"] = session
+            captured["api_id"] = api_id
+        async def connect(self):
+            return None
+        async def is_user_authorized(self):
+            return True
+        async def __call__(self, request):
+            captured["request"] = request
+            return SimpleNamespace(chats=[chat], messages=[message])
+        async def disconnect(self):
+            return None
+
+    module = ModuleType("telethon")
+    module.TelegramClient = FakeClient
+    module.functions = SimpleNamespace(messages=SimpleNamespace(
+        SearchGlobalRequest=lambda **kwargs: kwargs
+    ))
+    module.types = SimpleNamespace(
+        InputMessagesFilterEmpty=lambda: object(),
+        InputPeerEmpty=lambda: object(),
+    )
+    monkeypatch.setitem(sys.modules, "telethon", module)
+
+    from social_discovery import search_telegram_groups
+    result = search_telegram_groups(ADDRESS, 1234, "api-hash", "data/test-session")
+
+    assert captured["request"]["groups_only"] is True
+    assert captured["session"] == "data/test-session"
+    assert result[0]["url"] == "https://t.me/launch_group"
+    assert result[0]["official_verified"] is False
