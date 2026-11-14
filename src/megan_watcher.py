@@ -19,6 +19,8 @@ from typing import Any
 from dotenv import load_dotenv
 from web3 import Web3
 
+from trace_discovery import ContractCreation, TraceDiscovery
+
 LOG = logging.getLogger("megan")
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 SELECTORS = {
@@ -155,6 +157,15 @@ class Store:
           token0 TEXT NOT NULL, token1 TEXT NOT NULL, fee TEXT, block_number INTEGER NOT NULL,
           tx_hash TEXT NOT NULL, observed_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS deployments (
+          address TEXT PRIMARY KEY, creator TEXT NOT NULL, tx_hash TEXT NOT NULL,
+          block_number INTEGER NOT NULL, block_hash TEXT NOT NULL,
+          creation_method TEXT NOT NULL, trace_provider TEXT NOT NULL, observed_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS block_coverage (
+          block_number INTEGER PRIMARY KEY, block_hash TEXT NOT NULL,
+          trace_status TEXT NOT NULL, trace_provider TEXT, trace_error TEXT, observed_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS raw_events (
           id INTEGER PRIMARY KEY AUTOINCREMENT, block_number INTEGER NOT NULL,
           block_hash TEXT NOT NULL, tx_hash TEXT NOT NULL, log_index INTEGER,
@@ -184,6 +195,26 @@ class Store:
         self.db.commit()
         return cur.rowcount == 1
 
+    def add_deployment(self, creation: ContractCreation, block_number: int, block_hash: str) -> bool:
+        cur = self.db.execute("""
+          INSERT OR IGNORE INTO deployments(address,creator,tx_hash,block_number,block_hash,
+          creation_method,trace_provider,observed_at) VALUES(?,?,?,?,?,?,?,?)
+        """, (creation.address, creation.creator, creation.tx_hash, block_number, block_hash,
+              creation.creation_method, creation.provider, utc_now()))
+        self.db.commit()
+        return cur.rowcount == 1
+
+    def set_trace_coverage(self, block_number: int, block_hash: str, status: str,
+                           provider: str | None, error: str | None) -> None:
+        self.db.execute("""
+          INSERT INTO block_coverage(block_number,block_hash,trace_status,trace_provider,trace_error,observed_at)
+          VALUES(?,?,?,?,?,?) ON CONFLICT(block_number) DO UPDATE SET
+          block_hash=excluded.block_hash, trace_status=excluded.trace_status,
+          trace_provider=excluded.trace_provider, trace_error=excluded.trace_error,
+          observed_at=excluded.observed_at
+        """, (block_number, block_hash, status, provider, error, utc_now()))
+        self.db.commit()
+
     def add_pool(self, pool: dict[str, Any]) -> bool:
         cur = self.db.execute("""
           INSERT OR IGNORE INTO pools(address,dex_type,factory,token0,token1,fee,block_number,tx_hash,observed_at)
@@ -207,7 +238,8 @@ class Store:
 class EthereumWatcher:
     def __init__(self, rpc_url: str, db_path: str, poll_seconds: float,
                  confirmations: int, start_block: int | None,
-                 v2_factories: list[str], v3_factories: list[str]):
+                 v2_factories: list[str], v3_factories: list[str],
+                 trace_mode: str = "auto", trace_required: bool = False):
         self.w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 25}))
         if not self.w3.is_connected():
             raise ConnectionError("RPC endpoint is not reachable")
@@ -226,6 +258,8 @@ class EthereumWatcher:
         self.start_block = start_block
         self.v2_factories = v2_factories
         self.v3_factories = v3_factories
+        self.trace = TraceDiscovery(self.w3, trace_mode)
+        self.trace_required = trace_required
         self.running = True
 
     def stop(self, *_: Any) -> None:
@@ -278,6 +312,11 @@ class EthereumWatcher:
                 address = receipt.get("contractAddress")
                 if int(receipt["status"]) != 1 or not address:
                     continue
+                creation = ContractCreation(
+                    Web3.to_checksum_address(address).lower(),
+                    Web3.to_checksum_address(tx["from"]).lower(), tx_hash, "create", "eth_receipt",
+                )
+                self.store.add_deployment(creation, block["number"], block["hash"].hex())
                 token = self.inspect_token(address, tx.get("from"), tx_hash, block["number"], block["hash"].hex())
                 if token and self.store.add_token(token):
                     discovered += 1
@@ -288,6 +327,35 @@ class EthereumWatcher:
                 LOG.exception("Could not inspect contract creation tx %s", tx_hash)
                 raise
         return discovered
+
+    def scan_traced_deployments(self, block_number: int, block_hash: str) -> int:
+        if self.trace.mode == "off":
+            self.store.set_trace_coverage(block_number, block_hash, "disabled", None, None)
+            return 0
+        try:
+            batch = self.trace.trace_block(block_number)
+            added = 0
+            for creation in batch.creations:
+                address = Web3.to_checksum_address(creation.address)
+                creator = Web3.to_checksum_address(creation.creator)
+                normalized = ContractCreation(address.lower(), creator.lower(), creation.tx_hash,
+                                              creation.creation_method, creation.provider)
+                if self.store.add_deployment(normalized, block_number, block_hash):
+                    added += 1
+                token = self.inspect_token(address, creator, creation.tx_hash, block_number, block_hash)
+                if token and self.store.add_token(token):
+                    LOG.info("NEW TRACED TOKEN %s (%s) via %s at block %s",
+                             token.address, token.symbol or "?", creation.creation_method, block_number)
+                    self.store.add_event(block_number, block_hash, creation.tx_hash, None,
+                                         "token_discovered_trace", asdict(token), utc_now())
+            self.store.set_trace_coverage(block_number, block_hash, "complete", batch.provider, None)
+            return added
+        except Exception as exc:
+            self.store.set_trace_coverage(block_number, block_hash, "unavailable", None, str(exc)[:2000])
+            LOG.warning("TRACE COVERAGE UNAVAILABLE at block %s: %s", block_number, exc)
+            if self.trace_required:
+                raise
+            return 0
 
     def scan_factory_logs(self, block_number: int, block_hash: str) -> int:
         found = 0
@@ -344,10 +412,11 @@ class EthereumWatcher:
                     block_hash = block["hash"].hex()
                     # Persist progress only after both discovery passes complete.
                     token_count = self.scan_deployments(block)
+                    traced_count = self.scan_traced_deployments(next_block, block_hash)
                     pool_count = self.scan_factory_logs(next_block, block_hash)
                     self.store.set_state("last_processed_block", str(next_block))
-                    LOG.info("BLOCK %s processed | new_tokens=%s | new_pools=%s",
-                             next_block, token_count, pool_count)
+                    LOG.info("BLOCK %s processed | new_tokens=%s | traced_deployments=%s | new_pools=%s",
+                             next_block, token_count, traced_count, pool_count)
                     next_block += 1
             except Exception:
                 LOG.exception("Polling cycle failed; cursor retained for retry")
@@ -373,9 +442,11 @@ def main() -> int:
     db_path = os.getenv("DATABASE_PATH", "data/megan.sqlite3")
     v2_factories = env_addresses("V2_FACTORY_ADDRESSES")
     v3_factories = env_addresses("V3_FACTORY_ADDRESSES")
+    trace_mode = os.getenv("TRACE_MODE", "auto").strip().lower()
+    trace_required = os.getenv("TRACE_REQUIRED", "false").strip().lower() in {"1", "true", "yes"}
 
     watcher = EthereumWatcher(rpc_url, db_path, poll_seconds, confirmations,
-                              args.start_block, v2_factories, v3_factories)
+                              args.start_block, v2_factories, v3_factories, trace_mode, trace_required)
     signal.signal(signal.SIGINT, watcher.stop)
     signal.signal(signal.SIGTERM, watcher.stop)
     try:
@@ -387,6 +458,7 @@ def main() -> int:
             while block_number <= safe_tip:
                 block = watcher.w3.eth.get_block(block_number, full_transactions=True)
                 watcher.scan_deployments(block)
+                watcher.scan_traced_deployments(block_number, block["hash"].hex())
                 watcher.scan_factory_logs(block_number, block["hash"].hex())
                 watcher.store.set_state("last_processed_block", str(block_number))
                 block_number += 1
