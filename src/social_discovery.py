@@ -137,7 +137,8 @@ def _append_link(links: list[dict[str, Any]], seen: set[tuple[str, str]],
 def collect_social_evidence(address: str,
                             dexscreener_profiles: list[dict[str, Any]] | None = None,
                             dextools_token: dict[str, Any] | None = None,
-                            x_posts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                            x_posts: list[dict[str, Any]] | None = None,
+                            telegram_groups: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if not isinstance(address, str) or len(address) != 42 or not address.lower().startswith("0x"):
         raise ValueError("Expected a 20-byte Ethereum token address")
     target = address.lower()
@@ -186,13 +187,82 @@ def collect_social_evidence(address: str,
         "provider_profile_matches": len(profiles),
         "links": links,
         "x_mentions": mentions,
+        "telegram_groups": telegram_groups or [],
         "x_search_url": "https://x.com/search?q=" + urllib.parse.quote(f'"{address}"'),
-        "telegram_status": "provider_link_found" if has_telegram else "no_provider_link_found",
+        "telegram_status": ("group_found_by_account_search" if telegram_groups else
+                            "searched_no_group_match" if telegram_groups is not None else
+                            "provider_link_found" if has_telegram else "no_provider_link_found"),
         "x_status": "exact_mentions_found" if mentions else (
             "searched_no_exact_mentions" if x_posts is not None else "search_url_only"),
-        "overall_status": "evidence_found" if links or mentions else "no_public_evidence_found",
+        "overall_status": "evidence_found" if links or mentions or telegram_groups else "no_public_evidence_found",
         "important_note": "Provider-listed links and posts are not proof of official ownership or legitimacy.",
     }
+
+
+
+async def _telegram_search_async(address: str, api_id: int, api_hash: str,
+                                 session_file: str, limit: int) -> list[dict[str, Any]]:
+    try:
+        from telethon import TelegramClient, functions, types
+    except ImportError as exc:
+        raise SocialSourceError("Install optional Telegram support: pip install -e '.[telegram]'") from exc
+    client = TelegramClient(session_file, api_id, api_hash)
+    await client.connect()
+    try:
+        if not await client.is_user_authorized():
+            raise SocialSourceError("Telegram session is not authorized; run megan-telegram-login locally")
+        result = await client(functions.messages.SearchGlobalRequest(
+            q=address,
+            filter=types.InputMessagesFilterEmpty(),
+            min_date=None,
+            max_date=None,
+            offset_rate=0,
+            offset_peer=types.InputPeerEmpty(),
+            offset_id=0,
+            limit=limit,
+            groups_only=True,
+        ))
+        chats = {int(chat.id): chat for chat in (getattr(result, "chats", None) or [])}
+        found: dict[int, dict[str, Any]] = {}
+        for message in (getattr(result, "messages", None) or []):
+            body = str(getattr(message, "message", None) or "")
+            if address.lower() not in body.lower():
+                continue
+            peer = getattr(message, "peer_id", None)
+            peer_id = getattr(peer, "channel_id", None) or getattr(peer, "chat_id", None)
+            if peer_id is None:
+                continue
+            chat = chats.get(int(peer_id))
+            if chat is None or bool(getattr(chat, "broadcast", False)):
+                continue
+            chat_id = int(chat.id)
+            username = getattr(chat, "username", None)
+            found.setdefault(chat_id, {
+                "chat_id": str(chat_id),
+                "title": getattr(chat, "title", None),
+                "username": username,
+                "url": f"https://t.me/{username}" if username else None,
+                "message_id": int(getattr(message, "id", 0)),
+                "message_date": getattr(message, "date", None).isoformat()
+                    if getattr(message, "date", None) else None,
+                "message_excerpt": body[:1000],
+                "source": "telegram_mtproto_groups_only",
+                "evidence": "exact_contract_address_mention",
+                "official_verified": False,
+                "public_username": bool(username),
+            })
+        return list(found.values())
+    finally:
+        await client.disconnect()
+
+
+def search_telegram_groups(address: str, api_id: int, api_hash: str,
+                           session_file: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Search groups using the user's local MTProto session, never a bot token."""
+    import asyncio
+    if api_id <= 0 or not api_hash or not session_file:
+        raise ValueError("Telegram API ID, API hash and session file are required")
+    return asyncio.run(_telegram_search_async(address, api_id, api_hash, session_file, limit))
 
 
 class SocialStore:
@@ -259,11 +329,17 @@ def scan_once(database_path: str, limit: int = 20) -> int:
             profiles = []
         dt_key = os.getenv("DEXTOOLS_API_KEY", "").strip()
         x_token = os.getenv("X_BEARER_TOKEN", "").strip()
+        tg_api_id = int(os.getenv("TELEGRAM_API_ID", "0") or 0)
+        tg_api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
+        tg_session = os.getenv("TELEGRAM_SESSION_FILE", "data/telegram_user").strip()
+        tg_session_exists = Path(tg_session + ".session").is_file()
+        tg_searched_this_cycle = False
         count = 0
         for row in due:
             address = str(row["address"])
             dt_data = None
             x_posts = None
+            telegram_groups = None
             if dt_key:
                 try:
                     dt_data = fetch_dextools_token(address, dt_key)
@@ -274,7 +350,13 @@ def scan_once(database_path: str, limit: int = 20) -> int:
                     x_posts = fetch_x_recent_posts(address, x_token)
                 except SocialSourceError as exc:
                     LOG.warning("X search failed for %s: %s", address, exc)
-            evidence = collect_social_evidence(address, profiles, dt_data, x_posts)
+            if tg_api_id > 0 and tg_api_hash and tg_session_exists and not tg_searched_this_cycle:
+                tg_searched_this_cycle = True
+                try:
+                    telegram_groups = search_telegram_groups(address, tg_api_id, tg_api_hash, tg_session)
+                except Exception as exc:
+                    LOG.warning("Telegram group search failed for %s: %s", address, exc)
+            evidence = collect_social_evidence(address, profiles, dt_data, x_posts, telegram_groups)
             store.save(address, str(row["observed_at"]), evidence)
             print(json.dumps(evidence, ensure_ascii=False))
             count += 1
