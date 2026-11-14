@@ -44,7 +44,7 @@ class HolderSnapshot:
 def _topic_address(topic: Any, checksum) -> str:
     raw = topic.hex() if hasattr(topic, "hex") else str(topic)
     raw = raw[2:] if raw.startswith("0x") else raw
-    if len(raw) != 64:
+    if len(raw) != 64 or int(raw[:24], 16) != 0:
         raise ValueError("Malformed indexed address in Transfer log")
     return checksum("0x" + raw[-40:])
 
@@ -83,13 +83,13 @@ def fetch_erc20_holder_snapshot(
     to_block: int | None = None,
     chunk_size: int = 2_000,
     known_lp_pairs: Iterable[str] = (),
-    verified_lockers: Iterable[str] = (),
     deployer_address: str | None = None,
 ) -> HolderSnapshot:
     """Fetch all Transfer participants and verify balances at a pinned block.
 
-    known_lp_pairs and verified_lockers must come from independently verified
-    factory/locker evidence; this function does not infer either role by name.
+    known_lp_pairs must come from independently verified factory evidence.
+    Locker exclusions are deliberately not accepted here: partial or expired
+    locks must not exclude an entire contract balance from circulating supply.
     """
     if chunk_size < 1 or deployment_block < 0:
         raise ValueError("Invalid block range or chunk size")
@@ -114,13 +114,12 @@ def fetch_erc20_holder_snapshot(
     participants: set[str] = set()
     for log in logs:
         topics = log["topics"]
-        if len(topics) < 3:
+        if len(topics) != 3 or _hex(topics[0]).lower() != TRANSFER_TOPIC:
             raise ValueError("Malformed ERC-20 Transfer event")
         participants.add(_topic_address(topics[1], checksum))
         participants.add(_topic_address(topics[2], checksum))
 
     pairs = {checksum(a).lower() for a in known_lp_pairs}
-    lockers = {checksum(a).lower() for a in verified_lockers}
     burn_addresses = {ZERO, DEAD}
     rows: list[HolderBalance] = []
     for address in sorted(participants):
@@ -132,11 +131,9 @@ def fetch_erc20_holder_snapshot(
             role = "burn"
         elif lower in pairs:
             role = "lp_pair"
-        elif lower in lockers:
-            role = "verified_locker"
         else:
             code = w3.eth.get_code(address, block_identifier=end)
-            role = "contract" if code and bytes(code) not in (b"", b"\\x00") else "eoa"
+            role = "contract" if bytes(code) not in (b"", bytes(1)) else "eoa"
         rows.append(HolderBalance(address, balance, role))
 
     final_block = w3.eth.get_block(end)
