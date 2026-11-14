@@ -1,7 +1,7 @@
 [project]
 name = "megan-ethereum-watcher"
-version = "0.1.0"
-description = "Observation-only Ethereum token and DEX pool discovery MVP"
+version = "0.2.0"
+description = "Read-only Ethereum meme-coin discovery and social research"
 requires-python = ">=3.11"
 dependencies = [
   "web3>=7.0,<8.0",
@@ -14,16 +14,16 @@ dev = ["pytest>=8.0,<9.0"]
 [project.scripts]
 megan-watch = "megan_watcher:main"
 megan-research = "megan_research:main"
+megan-socials = "social_discovery:main"
 megan-holders = "megan_holders:main"
 megan-lp = "megan_lp:main"
 megan-deployer = "megan_deployer:main"
-megan-v3 = "megan_v3:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
 [tool.setuptools]
-py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research", "lp_analysis", "holder_analysis", "holder_snapshot", "megan_holders", "megan_lp", "deployer_history", "megan_deployer", "v3_position_snapshot", "megan_v3", "v2_locker_registry"]
+py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research", "social_discovery", "lp_analysis", "holder_analysis", "holder_snapshot", "megan_holders", "megan_lp", "deployer_history", "megan_deployer", "v2_locker_registry"]
 
 [tool.setuptools.package-dir]
 "" = "src"
