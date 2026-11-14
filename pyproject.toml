@@ -1,6 +1,6 @@
 [project]
 name = "megan-ethereum-watcher"
-version = "0.1.0"
+version = "0.2.0"
 description = "Observation-only Ethereum token and DEX pool discovery MVP"
 requires-python = ">=3.11"
 dependencies = [
@@ -10,15 +10,18 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0,<9.0"]
+telegram = ["telethon>=1.36,<2.0"]
 
 [project.scripts]
-megan-watch = "megan_watcher:main"\nmegan-research = "megan_research:main"
+megan-watch = "megan_watcher:main"
+megan-research = "megan_research:main"
+megan-sources = "instant_sources:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
 [tool.setuptools]
-py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research"]
+py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research", "instant_sources"]
 
 [tool.setuptools.package-dir]
 "" = "src"
