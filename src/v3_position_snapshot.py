@@ -114,7 +114,7 @@ def _topic_bytes(value: Any) -> bytes:
 
 def _topic_address(topic: Any, checksum) -> str:
     raw = _topic_bytes(topic)
-    if len(raw) != 32 or raw[:12] != b"\\x00" * 12:
+    if len(raw) != 32 or raw[:12] != bytes(12):
         raise ValueError("Malformed ERC-721 indexed address")
     return checksum("0x" + raw[-20:].hex())
 
@@ -224,7 +224,7 @@ def fetch_v3_position_snapshot(
             raise RuntimeError(f"ERC-721 ownerOf/event owner mismatch for tokenId {token_id}")
         position = contract.functions.positions(token_id).call(block_identifier=end)
         code = bytes(w3.eth.get_code(owner, block_identifier=end))
-        owner_type = "contract" if code and code != b"\\x00" else "eoa"
+        owner_type = "contract" if code not in (b"", bytes(1)) else "eoa"
         custody = "unlocked" if owner_type == "eoa" else "unknown"
         unlock_timestamp = None
         warning = None
