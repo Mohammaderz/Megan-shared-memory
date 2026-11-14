@@ -18,6 +18,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from web3 import Web3
+from web3.exceptions import ContractLogicError
 
 from trace_discovery import ContractCreation, TraceDiscovery
 
@@ -285,8 +286,9 @@ class EthereumWatcher:
                     values[key] = Web3.to_checksum_address("0x" + raw[-20:].hex()) if len(raw) >= 32 else None
                 else:
                     values[key] = decode_uint(raw)
-            except Exception:
-                # Individual metadata methods may legitimately be absent/revert.
+            except ContractLogicError:
+                # A contract-level revert can mean this optional method is unavailable.
+                # Provider/network failures must propagate so the block cursor cannot skip data.
                 values[key] = None
         # ERC-20-like heuristic: at least two identity/quantity methods must respond.
         evidence_count = sum(values.get(k) is not None for k in ("name", "symbol", "decimals", "total_supply"))
@@ -334,28 +336,31 @@ class EthereumWatcher:
             return 0
         try:
             batch = self.trace.trace_block(block_number)
-            added = 0
-            for creation in batch.creations:
-                address = Web3.to_checksum_address(creation.address)
-                creator = Web3.to_checksum_address(creation.creator)
-                normalized = ContractCreation(address.lower(), creator.lower(), creation.tx_hash,
-                                              creation.creation_method, creation.provider)
-                if self.store.add_deployment(normalized, block_number, block_hash):
-                    added += 1
-                token = self.inspect_token(address, creator, creation.tx_hash, block_number, block_hash)
-                if token and self.store.add_token(token):
-                    LOG.info("NEW TRACED TOKEN %s (%s) via %s at block %s",
-                             token.address, token.symbol or "?", creation.creation_method, block_number)
-                    self.store.add_event(block_number, block_hash, creation.tx_hash, None,
-                                         "token_discovered_trace", asdict(token), utc_now())
-            self.store.set_trace_coverage(block_number, block_hash, "complete", batch.provider, None)
-            return added
         except Exception as exc:
             self.store.set_trace_coverage(block_number, block_hash, "unavailable", None, str(exc)[:2000])
             LOG.warning("TRACE COVERAGE UNAVAILABLE at block %s: %s", block_number, exc)
             if self.trace_required:
                 raise
             return 0
+
+        # Do not swallow failures while inspecting created contracts: these are
+        # data-acquisition failures and must stop block advancement for a retry.
+        added = 0
+        for creation in batch.creations:
+            address = Web3.to_checksum_address(creation.address)
+            creator = Web3.to_checksum_address(creation.creator)
+            normalized = ContractCreation(address.lower(), creator.lower(), creation.tx_hash,
+                                          creation.creation_method, creation.provider)
+            if self.store.add_deployment(normalized, block_number, block_hash):
+                added += 1
+            token = self.inspect_token(address, creator, creation.tx_hash, block_number, block_hash)
+            if token and self.store.add_token(token):
+                LOG.info("NEW TRACED TOKEN %s (%s) via %s at block %s",
+                         token.address, token.symbol or "?", creation.creation_method, block_number)
+                self.store.add_event(block_number, block_hash, creation.tx_hash, None,
+                                     "token_discovered_trace", asdict(token), utc_now())
+        self.store.set_trace_coverage(block_number, block_hash, "complete", batch.provider, None)
+        return added
 
     def scan_factory_logs(self, block_number: int, block_hash: str) -> int:
         found = 0
