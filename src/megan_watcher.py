@@ -247,6 +247,8 @@ class EthereumWatcher:
         self.chain_id = self.w3.eth.chain_id
         if self.chain_id != 1:
             raise ValueError(f"Expected Ethereum mainnet chain_id=1, got {self.chain_id}")
+        if trace_required and trace_mode.strip().lower() == "off":
+            raise ValueError("TRACE_REQUIRED cannot be true when TRACE_MODE=off")
         self.store = Store(db_path)
         if poll_seconds <= 0:
             raise ValueError("POLL_SECONDS must be greater than zero")
