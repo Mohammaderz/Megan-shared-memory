@@ -98,6 +98,13 @@ def analyze_token_address(db: ResearchDB, address: str,
     if selected is None and pairs:
         selected = max(pairs, key=lambda p: _float((p.get("liquidity") or {}).get("usd")) or 0)
     metrics = extract_pool_metrics(selected) if selected else {}
+    liquidity_usd = _float(metrics.get("liquidity_usd"))
+    # Announcement gate: require a live Ethereum pool with strictly more than $100 liquidity.
+    # LP lock/burn state is deliberately not part of this gate.
+    qualified = bool(selected and liquidity_usd is not None and liquidity_usd > 100.0)
+    if not qualified:
+        return {"token": address, "qualified": False, "reason": "no_ethereum_pool_over_100_usd",
+                "liquidity_usd": liquidity_usd, "source": context}
     if selected:
         pool["pool_address"] = selected.get("pairAddress") or pool.get("pool_address")
         pool["pool_name"] = selected.get("baseToken", {}).get("name") or pool.get("pool_name")
@@ -134,6 +141,7 @@ def analyze_token_address(db: ResearchDB, address: str,
     db.upsert(address, pool, metrics, report.__dict__)
     result = {
         "token": address,
+        "qualified": True,
         "pool": pool.get("pool_address"),
         "source": context,
         "metrics": metrics,
