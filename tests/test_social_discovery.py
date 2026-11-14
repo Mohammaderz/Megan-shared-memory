@@ -120,3 +120,39 @@ def test_telegram_mtproto_search_uses_groups_only_and_returns_exact_mentions(mon
     assert captured["session"] == "data/test-session"
     assert result[0]["url"] == "https://t.me/launch_group"
     assert result[0]["official_verified"] is False
+
+
+
+def test_scan_once_searches_telegram_for_each_due_token(monkeypatch, capsys):
+    from types import SimpleNamespace
+    import social_discovery
+
+    addresses = [ADDRESS, "0x" + "cd" * 20]
+    searched = []
+
+    class FakeStore:
+        def __init__(self, path):
+            pass
+        def due_tokens(self, limit):
+            return [
+                SimpleNamespace(address=address, observed_at="2026-11-14T00:00:00+00:00")
+                for address in addresses
+            ][:limit]
+        def save(self, address, observed_at, evidence):
+            pass
+        def close(self):
+            pass
+
+    monkeypatch.setattr(social_discovery, "SocialStore", FakeStore)
+    monkeypatch.setattr(social_discovery, "fetch_dexscreener_latest_profiles", lambda: [])
+    monkeypatch.setattr(social_discovery.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(social_discovery, "search_telegram_groups",
+                        lambda address, *args: searched.append(address) or [])
+    monkeypatch.setenv("TELEGRAM_API_ID", "1234")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "test-hash")
+    monkeypatch.setenv("TELEGRAM_SESSION_FILE", "data/test-session")
+    monkeypatch.delenv("DEXTOOLS_API_KEY", raising=False)
+    monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
+
+    assert social_discovery.scan_once("unused.sqlite", limit=10) == 2
+    assert searched == addresses
