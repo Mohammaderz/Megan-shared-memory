@@ -146,6 +146,10 @@ def _verify_locker(w3, locker: LockerConfig, token_id: int, block: int,
     code = bytes(w3.eth.get_code(locker.address, block_identifier=block))
     if not code:
         return "unknown", None, "locker_has_no_code"
+    for slot in (EIP1967_IMPLEMENTATION_SLOT, EIP1967_BEACON_SLOT):
+        storage = bytes(w3.eth.get_storage_at(locker.address, slot, block_identifier=block))
+        if len(storage) == 32 and int.from_bytes(storage[-20:], "big") != 0:
+            return "unknown", None, "eip1967_proxy_locker_not_supported"
     code_hash = _hex(w3.keccak(code)).lower()
     if code_hash != locker.expected_code_hash:
         return "unknown", None, "locker_code_hash_mismatch"
@@ -193,12 +197,19 @@ def fetch_v3_position_snapshot(
     block = w3.eth.get_block(end)
     block_hash = _hex(block["hash"])
     timestamp = int(block["timestamp"])
+    manager_code = bytes(w3.eth.get_code(manager, block_identifier=end))
+    if not manager_code:
+        raise ValueError("Position manager has no bytecode at snapshot block")
     contract = w3.eth.contract(address=manager, abi=POSITION_MANAGER_ABI)
 
     # Keep the last Transfer recipient for every minted tokenId. This also
     # identifies burns without treating ownerOf() reverts as successful evidence.
     last_owner: dict[int, str] = {}
     logs = _fetch_logs_adaptive(w3, manager, from_block, end, chunk_size)
+    logs.sort(key=lambda log: (
+        int(log.get("blockNumber", 0)), int(log.get("transactionIndex", 0)),
+        int(log.get("logIndex", 0)),
+    ))
     for log in logs:
         topics = log["topics"]
         if len(topics) != 4 or _topic_bytes(topics[0]).hex() != TRANSFER_TOPIC[2:]:
