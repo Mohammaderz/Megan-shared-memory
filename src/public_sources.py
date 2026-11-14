@@ -66,3 +66,24 @@ def extract_pool_metrics(pair: dict[str, Any]) -> dict[str, Any]:
 def _number(value: Any) -> float | None:
     try: return float(value) if value is not None else None
     except (TypeError, ValueError): return None
+
+
+def parse_honeypot_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract only explicitly supported Honeypot.is evidence.
+
+    simulationSuccess describes whether the provider's simulation completed; it
+    does not separately prove that both a buy and a sell succeeded. Likewise,
+    the presence of buyTax/sellTax is not a directional execution result.
+    """
+    result = payload.get("honeypotResult") or {}
+    simulation = payload.get("simulationResult") or {}
+    honeypot = result.get("isHoneypot")
+    return {
+        "honeypot": honeypot if isinstance(honeypot, bool) else None,
+        "buy_tax_pct": _number(simulation.get("buyTax")),
+        "sell_tax_pct": _number(simulation.get("sellTax")),
+        "simulation_buy_ok": None,
+        "simulation_sell_ok": None,
+        "simulation_success": payload.get("simulationSuccess")
+            if isinstance(payload.get("simulationSuccess"), bool) else None,
+    }
