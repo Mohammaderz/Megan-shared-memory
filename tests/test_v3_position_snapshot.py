@@ -69,7 +69,14 @@ class FakeEth:
         return FakeContract()
 
     def get_code(self, address, block_identifier=None):
-        return self.owner_code if address.lower() == LOCKER.lower() else b""
+        if address.lower() == LOCKER.lower():
+            return self.owner_code
+        if address.lower() == MANAGER.lower():
+            return b"position-manager-bytecode"
+        return b""
+
+    def get_storage_at(self, address, slot, block_identifier=None):
+        return bytes(32)
 
     def call(self, transaction, block_identifier=None):
         data = transaction["data"]
@@ -182,3 +189,30 @@ def test_locker_registry_checks_chain_and_selector_shape(tmp_path):
     assert len(rows) == 1
     with pytest.raises(ValueError, match="chain_id"):
         load_locker_registry(str(path), 5, lambda value: value.lower())
+
+def test_v3_eip1967_proxy_locker_is_not_trusted():
+    class ProxyEth(FakeEth):
+        def get_storage_at(self, address, slot, block_identifier=None):
+            return bytes.fromhex("00" * 12 + "99" * 20)
+    class ProxyWeb3(FakeWeb3):
+        eth = ProxyEth()
+    result = fetch_v3_position_snapshot(
+        ProxyWeb3(), MANAGER, 1, to_block=100, lockers=[config()]
+    )
+    assert result.unknown_count == 1
+    assert "eip1967_proxy_locker_not_supported" in result.positions[0].warning
+
+
+def test_v3_reorg_invalidates_snapshot_counts():
+    class ReorgEth(FakeEth):
+        reads = 0
+        def get_block(self, number):
+            self.reads += 1
+            marker = "ab" if self.reads == 1 else "cd"
+            return {"hash": "0x" + marker * 32, "timestamp": NOW}
+    class ReorgWeb3(FakeWeb3):
+        eth = ReorgEth()
+    result = fetch_v3_position_snapshot(ReorgWeb3(), MANAGER, 1, to_block=100)
+    assert result.complete is False
+    assert result.unknown_count == 0
+    assert "snapshot_block_reorged_during_read" in result.warnings
