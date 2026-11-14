@@ -56,7 +56,7 @@ def decode_text(data: bytes) -> str | None:
         if offset + 32 <= len(data):
             size = int.from_bytes(data[offset:offset + 32], "big")
             raw = data[offset + 32:offset + 32 + size]
-            if size <= len(data) and raw:
+            if offset + 32 + size <= len(data) and raw:
                 return raw.decode("utf-8", errors="replace").rstrip("\x00")
     except (ValueError, UnicodeDecodeError):
         pass
@@ -278,7 +278,7 @@ class EthereumWatcher:
         elif self.start_block is not None:
             next_block = self.start_block
         else:
-            next_block = self.w3.eth.block_number
+            next_block = max(0, self.w3.eth.block_number - self.confirmations)
         LOG.info("Megan watcher online | chain_id=%s | starting_block=%s | confirmations=%s",
                  self.chain_id, next_block, self.confirmations)
         while self.running:
@@ -327,7 +327,7 @@ def main() -> int:
         if args.once:
             watcher.poll_seconds = 0
             cursor = watcher.store.get_state("last_processed_block")
-            block_number = int(cursor) + 1 if cursor else (args.start_block or watcher.w3.eth.block_number)
+            block_number = int(cursor) + 1 if cursor is not None else (args.start_block if args.start_block is not None else max(0, watcher.w3.eth.block_number - confirmations))
             safe_tip = max(0, watcher.w3.eth.block_number - confirmations)
             while block_number <= safe_tip:
                 block = watcher.w3.eth.get_block(block_number, full_transactions=True)
