@@ -81,8 +81,9 @@ def classify_lp_supply(
         return _unknown(total_supply_raw, "holder_snapshot_incomplete")
     if sum(balances.values()) != total_supply_raw:
         return _unknown(total_supply_raw, "holder_balances_do_not_reconcile_to_supply")
-    if not locks_complete:
-        return _unknown(total_supply_raw, "locker_registry_or_records_incomplete")
+    # Continue with partial attribution: known EOA/burn balances remain useful,
+    # while contract custody not covered by verified lock records stays UNKNOWN.
+    # An incomplete locker registry must never turn contract-held LP into unlocked LP.
 
     locked_by_address: dict[str, int] = {}
     expiry_by_address: dict[str, list[int]] = {}
