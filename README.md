@@ -41,6 +41,15 @@ RPC باید آرشیو لاگ‌های بازه موردنیاز را ارائ�
 
 ### بررسی LP توکن‌های Uniswap V2
 
+بدون registry، موجودی قراردادها UNKNOWN می‌ماند. برای افزودن adapter باید ABI واقعی پروتکل را مستقل بررسی کنید و آدرس قرارداد، bytecode hash، selectorهای `lockCount(address)` و `lockInfo(address,uint256)` با خروجی دقیق `(address,uint256,uint256)` را در فایل registry ثبت کنید. نمونه `config/v2-lockers.example.json` عمداً فاقد locker تأییدشده است. مقدار `coverage_complete` را فقط وقتی `true` کنید که پوشش فهرست lockerهای موردنظر را واقعاً بررسی کرده‌اید.
+
+نمونه اجرا:
+
+```bash
+megan-lp --pair 0xPAIR_ADDRESS --created-block 19000000 --lockers-file config/my-v2-lockers.json
+```
+
+
 برای خواندن توکن LP جفت‌ارز V2 از بلاک ایجاد جفت تا بلاک snapshot:
 
 ```bash
