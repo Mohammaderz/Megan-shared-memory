@@ -13,3 +13,9 @@ megan-watch = "megan_watcher:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.setuptools]
+py-modules = ["megan_watcher"]
+
+[tool.setuptools.package-dir]
+"" = "src"
