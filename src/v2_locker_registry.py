@@ -78,11 +78,13 @@ def _word(data: bytes, index: int) -> bytes:
 
 
 def read_v2_locker_records(w3, pair_address: str, block_number: int,
-                           adapters: tuple[V2LockerAdapter, ...]) -> V2LockerRead:
+                           adapters: tuple[V2LockerAdapter, ...], *, registry_complete: bool = False) -> V2LockerRead:
     pair = w3.to_checksum_address(pair_address)
     locks: list[VerifiedLock] = []
     warnings: list[str] = []
-    complete = True
+    complete = bool(registry_complete)
+    if not registry_complete:
+        warnings.append("locker_registry_not_declared_complete")
     for adapter in adapters:
         code = bytes(w3.eth.get_code(adapter.address, block_identifier=block_number))
         if not code or _hex(w3.keccak(code)).lower() != adapter.expected_code_hash:
