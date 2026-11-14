@@ -48,8 +48,27 @@ def _get_json(url: str, headers: dict[str, str] | None = None) -> Any:
 
 
 def fetch_dexscreener_latest_profiles() -> list[dict[str, Any]]:
-    payload = _get_json("https://api.dexscreener.com/token-profiles/latest/v1")
-    return payload if isinstance(payload, list) else []
+    """Merge new and recently updated profiles so delayed social links are not missed."""
+    combined: dict[tuple[str, str], dict[str, Any]] = {}
+    successes = 0
+    errors = []
+    for endpoint in ("latest", "recent-updates"):
+        try:
+            payload = _get_json(f"https://api.dexscreener.com/token-profiles/{endpoint}/v1")
+            successes += 1
+            if isinstance(payload, list):
+                for row in payload:
+                    if not isinstance(row, dict):
+                        continue
+                    key = (str(row.get("chainId", "")).lower(),
+                           str(row.get("tokenAddress", "")).lower())
+                    if key[1]:
+                        combined[key] = row
+        except SocialSourceError as exc:
+            errors.append(str(exc))
+    if successes == 0:
+        raise SocialSourceError("; ".join(errors) or "DEX Screener profile feeds unavailable")
+    return list(combined.values())
 
 
 def fetch_dextools_token(address: str, api_key: str) -> dict[str, Any]:
