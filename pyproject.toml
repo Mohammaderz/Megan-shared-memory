@@ -17,12 +17,13 @@ megan-research = "megan_research:main"
 megan-holders = "megan_holders:main"
 megan-lp = "megan_lp:main"
 megan-deployer = "megan_deployer:main"
+megan-v3 = "megan_v3:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
 [tool.setuptools]
-py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research", "lp_analysis", "holder_analysis", "holder_snapshot", "megan_holders", "megan_lp", "deployer_history", "megan_deployer"]
+py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research", "lp_analysis", "holder_analysis", "holder_snapshot", "megan_holders", "megan_lp", "deployer_history", "megan_deployer", "v3_position_snapshot", "megan_v3"]
 
 [tool.setuptools.package-dir]
 "" = "src"
