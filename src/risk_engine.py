@@ -112,7 +112,8 @@ def assess(e: RiskEvidence) -> RiskReport:
         momentum += min(15, e.social_mentions_1h * 0.5) if e.social_sources >= 2 else min(4, e.social_mentions_1h * 0.2)
     if e.volume_liquidity_ratio_1h is not None:
         momentum += min(15, max(0, e.volume_liquidity_ratio_1h) * 5)
-    if e.liquidity_usd is not None and e.liquidity_usd >= 20_000: momentum += 10
+    # Liquidity is a quality/risk gate, not evidence of momentum by itself.
+    # A deep pool with no observed buyer, volume or social activity is not a signal.
     opportunity = max(0, min(100, round(momentum * (1 - risk / 100))))
     critical = {"honeypot", "simulation_sell_ok", "simulation_buy_ok",
                 "lp_locked_share_pct", "liquidity_usd", "top10_holder_share_pct",
