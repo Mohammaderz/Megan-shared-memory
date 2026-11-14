@@ -157,5 +157,5 @@ def test_zero_balance_transfer_participants_are_not_reported_as_holders():
         eth = ZeroBalanceEth()
 
     result = fetch_erc20_holder_snapshot(ZeroBalanceWeb3(), TOKEN, 90, to_block=100)
-    assert result.complete is False
-    assert result.holder_count == 2
+    assert result.complete is True
+    assert result.holder_count == 1
