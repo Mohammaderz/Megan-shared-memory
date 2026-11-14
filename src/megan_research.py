@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from public_sources import (
     SourceError, dexscreener_token_pairs, extract_pool_metrics,
     geckoterminal_new_pools, honeypot_check,
@@ -163,11 +165,14 @@ def scan_once(db: ResearchDB) -> int:
 
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Megan public Ethereum token research watcher")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval", type=int, default=30)
-    parser.add_argument("--db", default=os.getenv("DATABASE_PATH", "data/megan.sqlite3"))
+    parser.add_argument("--db", default=None)
     args = parser.parse_args()
+    if args.db is None:
+        args.db = os.getenv("DATABASE_PATH", "data/megan.sqlite3")
     if args.interval < 5:
         parser.error("--interval must be at least 5 seconds")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
