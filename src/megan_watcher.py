@@ -72,7 +72,7 @@ def decode_uint(data: bytes) -> int | None:
 
 def _topic_address(topic: bytes) -> str:
     raw = bytes(topic)
-    if len(raw) != 32 or raw[:12] != b"\\x00" * 12:
+    if len(raw) != 32 or raw[:12] != b"\x00" * 12:
         raise ValueError("Malformed indexed address topic")
     return Web3.to_checksum_address("0x" + raw[-20:].hex())
 
@@ -80,7 +80,7 @@ def _topic_address(topic: bytes) -> str:
 def _data_address(data: bytes, word_index: int) -> str:
     start = word_index * 32
     word = data[start:start + 32]
-    if len(word) != 32 or word[:12] != b"\\x00" * 12:
+    if len(word) != 32 or word[:12] != b"\x00" * 12:
         raise ValueError("Malformed ABI address word")
     return Web3.to_checksum_address("0x" + word[-20:].hex())
 
