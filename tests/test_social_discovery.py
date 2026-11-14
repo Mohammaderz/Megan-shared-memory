@@ -55,3 +55,19 @@ def test_non_https_social_links_are_ignored():
         "links": [{"type": "telegram", "url": "http://t.me/insecure"}],
     }])
     assert result["links"] == []
+
+
+
+def test_telegram_group_search_results_are_not_mistaken_for_official_links():
+    groups = [{
+        "chat_id": "42", "title": "Token discussion",
+        "username": "token_discussion",
+        "url": "https://t.me/token_discussion",
+        "source": "telegram_mtproto_groups_only",
+        "evidence": "exact_contract_address_mention",
+        "official_verified": False,
+    }]
+    result = collect_social_evidence(ADDRESS, telegram_groups=groups)
+    assert result["telegram_status"] == "group_found_by_account_search"
+    assert result["telegram_groups"][0]["url"] == "https://t.me/token_discussion"
+    assert result["overall_status"] == "evidence_found"
