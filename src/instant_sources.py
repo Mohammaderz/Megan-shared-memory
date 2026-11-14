@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from dotenv import load_dotenv
+
 LOG = logging.getLogger("megan.sources")
 ADDRESS_RE = re.compile(r"(?<![0-9a-fA-F])0x[a-fA-F0-9]{40}(?![0-9a-fA-F])")
 USER_AGENT = "Megan-Ethereum-Source-Intake/0.2"
@@ -200,11 +202,14 @@ def poll_sources(store: AlertStore, rss_urls: list[str], channels: list[str]) ->
 
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Poll configured Ethereum contract-alert sources")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval", type=int, default=3)
-    parser.add_argument("--db", default=os.getenv("DATABASE_PATH", "data/megan.sqlite3"))
+    parser.add_argument("--db", default=None)
     args = parser.parse_args()
+    if args.db is None:
+        args.db = os.getenv("DATABASE_PATH", "data/megan.sqlite3")
     if args.interval < 1:
         parser.error("--interval must be at least one second")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
