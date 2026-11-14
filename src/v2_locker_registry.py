@@ -91,7 +91,7 @@ def read_v2_locker_records(w3, pair_address: str, block_number: int,
             complete = False
             warnings.append(f"{adapter.address}:locker_code_hash_mismatch_or_missing")
             continue
-        pair_word = bytes.fromhex(pair[2:]).rjust(32, b"\\x00")
+        pair_word = bytes.fromhex(pair[2:]).rjust(32, bytes(1))
         try:
             count_raw = bytes(w3.eth.call({
                 "to": adapter.address,
