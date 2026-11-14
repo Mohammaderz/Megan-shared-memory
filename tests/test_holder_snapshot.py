@@ -125,3 +125,37 @@ def test_log_fetch_reduces_range_after_provider_limit():
     )
     assert result.complete is True
     assert LimitedWeb3.eth.calls > 1
+
+def test_snapshot_marks_reorg_during_read_incomplete():
+    class ReorgEth(FakeEth):
+        block_reads = 0
+        def get_block(self, number):
+            self.block_reads += 1
+            marker = "ab" if self.block_reads == 1 else "cd"
+            return {"hash": "0x" + marker * 32, "timestamp": 1_800_000_000}
+
+    class ReorgWeb3(FakeWeb3):
+        eth = ReorgEth()
+
+    result = fetch_erc20_holder_snapshot(ReorgWeb3(), TOKEN, 90, to_block=100)
+    assert result.complete is False
+    assert result.report.status == "unknown"
+    assert "snapshot_block_reorged_during_read" in result.warnings
+
+
+def test_zero_balance_transfer_participants_are_not_reported_as_holders():
+    class ZeroBalanceEth(FakeEth):
+        def contract(self, address, abi):
+            class Functions:
+                def totalSupply(self):
+                    return FakeCall(700)
+                def balanceOf(self, address):
+                    return FakeCall(700 if address == WALLET_A else 0)
+            return SimpleNamespace(functions=Functions())
+
+    class ZeroBalanceWeb3(FakeWeb3):
+        eth = ZeroBalanceEth()
+
+    result = fetch_erc20_holder_snapshot(ZeroBalanceWeb3(), TOKEN, 90, to_block=100)
+    assert result.complete is False
+    assert result.holder_count == 2
