@@ -114,6 +114,12 @@ def assess(e: RiskEvidence) -> RiskReport:
         momentum += min(15, max(0, e.volume_liquidity_ratio_1h) * 5)
     if e.liquidity_usd is not None and e.liquidity_usd >= 20_000: momentum += 10
     opportunity = max(0, min(100, round(momentum * (1 - risk / 100))))
+    # Unlocked or materially under-locked LP makes a fast-exit signal misleading:
+    # the liquidity provider can remove the pool depth before the user can exit.
+    if e.liquidity_lock_status == "unlocked" or (
+        e.lp_locked_share_pct is not None and e.lp_locked_share_pct < 50
+    ):
+        opportunity = 0
     critical = {"honeypot", "simulation_sell_ok", "lp_locked_share_pct", "liquidity_usd",
                 "top10_holder_share_pct", "owner_can_mint", "owner_can_blacklist"}
     missing_critical = critical.intersection(unknown)
