@@ -28,6 +28,7 @@ class DeployerHistory:
     status: str
     creator: str
     observed_deployment_count: int
+    records_truncated: bool
     first_observed_block: int | None
     last_observed_block: int | None
     coverage_start_block: int | None
@@ -71,6 +72,11 @@ def lookup_deployer_history(
         if before_block is not None:
             where += " AND block_number < ?"
             args.append(before_block)
+        summary = db.execute(
+            f"SELECT COUNT(*) AS n, MIN(block_number) AS lo, MAX(block_number) AS hi "
+            f"FROM deployments WHERE {where}", args,
+        ).fetchone()
+        total_count = int(summary["n"])
         rows = db.execute(
             f"SELECT address,tx_hash,block_number,creation_method,trace_provider "
             f"FROM deployments WHERE {where} ORDER BY block_number DESC LIMIT ?",
@@ -90,25 +96,32 @@ def lookup_deployer_history(
         if "block_coverage" in tables:
             coverage = db.execute(
                 "SELECT MIN(block_number) AS lo, MAX(block_number) AS hi, "
-                "COUNT(DISTINCT block_number) AS n FROM block_coverage"
+                "COUNT(DISTINCT block_number) AS n, "
+                "SUM(CASE WHEN trace_status='complete' THEN 1 ELSE 0 END) AS complete_n "
+                "FROM block_coverage"
             ).fetchone()
             if coverage and coverage["lo"] is not None:
                 coverage_start, coverage_end = int(coverage["lo"]), int(coverage["hi"])
-                contiguous = int(coverage["n"]) == coverage_end - coverage_start + 1
+                expected = coverage_end - coverage_start + 1
+                contiguous = (int(coverage["n"]) == expected
+                              and int(coverage["complete_n"] or 0) == expected)
         else:
             warnings.append("trace_block_coverage_table_missing")
 
-        if not deployments:
+        truncated = total_count > len(deployments)
+        if truncated:
+            warnings.append("deployment_record_list_truncated_by_limit")
+        if total_count == 0:
             warnings.append("no_deployments_observed_for_creator")
         if not contiguous:
-            warnings.append("observed_block_coverage_is_not_proven_contiguous")
+            warnings.append("observed_trace_coverage_is_not_proven_complete_and_contiguous")
         warnings.append("prior_rug_outcomes_not_verified_by_deployment_database")
         warnings.append("funding_relationships_not_traced")
 
-        blocks = [item.block_number for item in deployments]
         return DeployerHistory(
-            "observed_history_only", creator, len(deployments),
-            min(blocks) if blocks else None, max(blocks) if blocks else None,
+            "observed_history_only", creator, total_count, truncated,
+            int(summary["lo"]) if summary["lo"] is not None else None,
+            int(summary["hi"]) if summary["hi"] is not None else None,
             coverage_start, coverage_end, contiguous, None, "unknown",
             deployments, tuple(warnings),
         )
