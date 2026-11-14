@@ -40,3 +40,19 @@ def test_tax_presence_does_not_claim_buy_simulation_succeeded(monkeypatch, tmp_p
     assert report["evidence"]["sell_tax_pct"] == 2.0
     assert report["evidence"]["simulation_buy_ok"] is None
     assert "simulation success remains UNKNOWN" in " ".join(report["evidence"]["notes"])
+def test_token_address_selects_non_quote_when_base_is_weth():
+    weth = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    meme = "0x" + "cd" * 20
+    assert research._token_address({
+        "base_token_id": f"eth_{weth}",
+        "quote_token_id": f"eth_{meme}",
+    }) == meme
+
+
+def test_token_address_returns_unknown_for_two_unrecognized_assets():
+    first = "0x" + "11" * 20
+    second = "0x" + "22" * 20
+    assert research._token_address({
+        "base_token_id": f"eth_{first}",
+        "quote_token_id": f"eth_{second}",
+    }) is None
