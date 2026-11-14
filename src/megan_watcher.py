@@ -70,6 +70,55 @@ def decode_uint(data: bytes) -> int | None:
     return int.from_bytes(data[-32:], "big") if len(data) >= 32 else None
 
 
+def _topic_address(topic: bytes) -> str:
+    raw = bytes(topic)
+    if len(raw) != 32 or raw[:12] != b"\\x00" * 12:
+        raise ValueError("Malformed indexed address topic")
+    return Web3.to_checksum_address("0x" + raw[-20:].hex())
+
+
+def _data_address(data: bytes, word_index: int) -> str:
+    start = word_index * 32
+    word = data[start:start + 32]
+    if len(word) != 32 or word[:12] != b"\\x00" * 12:
+        raise ValueError("Malformed ABI address word")
+    return Web3.to_checksum_address("0x" + word[-20:].hex())
+
+
+def decode_v2_pair_created(topics: list[Any], data: bytes) -> tuple[str, str, str]:
+    """Decode Uniswap-V2 PairCreated topics/data into token0, token1, pair."""
+    if len(topics) != 3 or bytes(topics[0]) != bytes.fromhex(V2_EVENT[2:]):
+        raise ValueError("Not a valid V2 PairCreated event")
+    raw = bytes(data)
+    if len(raw) != 64:
+        raise ValueError("V2 PairCreated data must contain address and uint256 words")
+    token0 = _topic_address(topics[1])
+    token1 = _topic_address(topics[2])
+    pair = _data_address(raw, 0)
+    return token0, token1, pair
+
+
+def decode_v3_pool_created(topics: list[Any], data: bytes) -> tuple[str, str, str, int]:
+    """Decode Uniswap-V3 PoolCreated topics/data into token0, token1, pool, fee."""
+    if len(topics) != 4 or bytes(topics[0]) != bytes.fromhex(V3_EVENT[2:]):
+        raise ValueError("Not a valid V3 PoolCreated event")
+    fee_word = bytes(topics[3])
+    if len(fee_word) != 32 or int.from_bytes(fee_word[:29], "big") != 0:
+        raise ValueError("Malformed V3 fee topic")
+    fee = int.from_bytes(fee_word[-3:], "big")
+    raw = bytes(data)
+    if len(raw) != 64:
+        raise ValueError("V3 PoolCreated data must contain int24 and address words")
+    tick_word = raw[:32]
+    tick_value = int.from_bytes(tick_word, "big", signed=True)
+    if not -(2**23) <= tick_value < 2**23:
+        raise ValueError("V3 tickSpacing is outside int24 range")
+    token0 = _topic_address(topics[1])
+    token1 = _topic_address(topics[2])
+    pool = _data_address(raw, 1)
+    return token0, token1, pool, fee
+
+
 @dataclass
 class TokenRecord:
     address: str
@@ -255,17 +304,13 @@ class EthereumWatcher:
                     })
                     for item in logs:
                         topics = item["topics"]
-                        token0 = Web3.to_checksum_address("0x" + topics[1].hex()[-40:])
-                        token1 = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
                         if dex_type == "uniswap_v2_style":
-                            decoded = self.w3.codec.decode(["address", "uint256"], bytes(item["data"]))
-                            pool_address, fee = Web3.to_checksum_address(decoded[0]), None
+                            token0, token1, pool_address = decode_v2_pair_created(topics, bytes(item["data"]))
+                            fee = None
                         else:
-                            # In Uniswap V3 PoolCreated, fee is indexed (topics[3]);
-                            # data contains only tickSpacing and pool address.
-                            fee = str(int.from_bytes(bytes(topics[3]), "big"))
-                            decoded = self.w3.codec.decode(["int24", "address"], bytes(item["data"]))
-                            pool_address = Web3.to_checksum_address(decoded[1])
+                            # V3 fee is indexed in topics[3]; data is int24 tickSpacing + pool address.
+                            token0, token1, pool_address, fee_value = decode_v3_pool_created(topics, bytes(item["data"]))
+                            fee = str(fee_value)
                         record = {
                             "address": pool_address, "dex_type": dex_type, "factory": factory,
                             "token0": token0, "token1": token1, "fee": fee,
