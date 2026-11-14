@@ -82,6 +82,9 @@ megan-deployer --creator 0xCREATOR_ADDRESS --db data/megan.sqlite3
 
 ~~~bash
 megan-socials --once
+megan-run  # اجرای هم‌زمان پایش لانچ، بازار و شبکه‌های اجتماعی
+
+# یا فقط پایش شبکه‌های اجتماعی:
 megan-socials --interval 15
 ~~~
 
