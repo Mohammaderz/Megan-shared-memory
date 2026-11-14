@@ -21,7 +21,7 @@ python -m pytest -q
 ```
 
 ### کشف قرارداد و استخر در زنجیره
-`ETHEREUM_RPC_URL` را در `.env` تنظیم کنید. برای دیدن CREATE2 داخلی، RPC باید trace API داشته باشد:
+`ETHEREUM_RPC_URL` را در `.env` تنظیم کنید. برای دیدن CREATE2 داخلی، RPC باید trace API داشته باشد. به‌صورت پیش‌فرض `TRACE_REQUIRED=true` است؛ اگر trace در دسترس نباشد، اسکنر جلو نمی‌رود تا بلوک‌های ناقص را بی‌صدا رد نکند. فقط در صورت پذیرش صریح پوشش ناقص، آن را `false` کنید:
 
 ```bash
 megan-watch
