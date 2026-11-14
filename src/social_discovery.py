@@ -266,7 +266,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Megan read-only Telegram/X link discovery")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval", type=int, default=15)
-    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--db", default=os.getenv("DATABASE_PATH", "data/megan.sqlite3"))
     args = parser.parse_args()
     if args.interval < 5 or args.limit < 1:
