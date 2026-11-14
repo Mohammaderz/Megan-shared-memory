@@ -1,0 +1,15 @@
+[project]
+name = "megan-ethereum-watcher"
+version = "0.1.0"
+description = "Observation-only Ethereum token and DEX pool discovery MVP"
+requires-python = ">=3.11"
+dependencies = [
+  "web3>=7.0,<8.0",
+  "python-dotenv>=1.0,<2.0",
+]
+
+[project.scripts]
+megan-watch = "megan_watcher:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
