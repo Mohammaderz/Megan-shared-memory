@@ -108,6 +108,6 @@ class TraceDiscovery:
                     return normalize_erigon_block_trace(self._request("trace_block", [block_hex]))
                 raw = self._request("debug_traceBlockByNumber", [block_hex, {"tracer": "callTracer"}])
                 return normalize_geth_block_trace(raw)
-            except (TraceRPCError, ValueError, TypeError) as exc:
+            except Exception as exc:
                 attempts.append(str(exc))
         raise TraceRPCError("No supported block trace API succeeded: " + " | ".join(attempts))
