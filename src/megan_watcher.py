@@ -166,6 +166,12 @@ class EthereumWatcher:
         if self.chain_id != 1:
             raise ValueError(f"Expected Ethereum mainnet chain_id=1, got {self.chain_id}")
         self.store = Store(db_path)
+        if poll_seconds <= 0:
+            raise ValueError("POLL_SECONDS must be greater than zero")
+        if confirmations < 0:
+            raise ValueError("CONFIRMATIONS cannot be negative")
+        if start_block is not None and start_block < 0:
+            raise ValueError("START_BLOCK cannot be negative")
         self.poll_seconds = poll_seconds
         self.confirmations = confirmations
         self.start_block = start_block
@@ -232,6 +238,7 @@ class EthereumWatcher:
                                          "token_discovered", asdict(token), utc_now())
             except Exception:
                 LOG.exception("Could not inspect contract creation tx %s", tx_hash)
+                raise
         return discovered
 
     def scan_factory_logs(self, block_number: int, block_hash: str) -> int:
@@ -254,8 +261,11 @@ class EthereumWatcher:
                             decoded = self.w3.codec.decode(["address", "uint256"], bytes(item["data"]))
                             pool_address, fee = Web3.to_checksum_address(decoded[0]), None
                         else:
-                            decoded = self.w3.codec.decode(["uint24", "int24", "address"], bytes(item["data"]))
-                            fee, pool_address = str(decoded[0]), Web3.to_checksum_address(decoded[2])
+                            # In Uniswap V3 PoolCreated, fee is indexed (topics[3]);
+                            # data contains only tickSpacing and pool address.
+                            fee = str(int.from_bytes(bytes(topics[3]), "big"))
+                            decoded = self.w3.codec.decode(["int24", "address"], bytes(item["data"]))
+                            pool_address = Web3.to_checksum_address(decoded[1])
                         record = {
                             "address": pool_address, "dex_type": dex_type, "factory": factory,
                             "token0": token0, "token1": token1, "fee": fee,
@@ -269,6 +279,7 @@ class EthereumWatcher:
                                              int(item["logIndex"]), "pool_created", record, utc_now())
                 except Exception:
                     LOG.exception("Factory scan failed: %s at block %s", factory, block_number)
+                    raise
         return found
 
     def run(self) -> None:
