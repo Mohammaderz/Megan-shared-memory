@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from public_sources import (
     SourceError,
     dexscreener_token_pairs,
@@ -164,6 +166,7 @@ def scan_once(db: ResearchDB) -> int:
 
 
 def main() -> None:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Megan public Ethereum token research watcher")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval", type=int, default=30)
