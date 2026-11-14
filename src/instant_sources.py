@@ -216,9 +216,31 @@ def main() -> int:
     try:
         while True:
             alerts = poll_sources(store, rss, channels)
+            # Hand fresh alert addresses straight to the research pipeline in this process.
+            # A message may mention the same contract more than once; analyze it once per poll.
+            if alerts:
+                from megan_research import ResearchDB, analyze_token_address
+                research_db = ResearchDB(args.db)
+                analyzed: set[str] = set()
+                try:
+                    for alert in alerts:
+                        for address in alert["addresses"]:
+                            if address in analyzed:
+                                continue
+                            analyzed.add(address)
+                            analyze_token_address(research_db, address, {
+                                "source": alert["source_type"],
+                                "source_name": alert["source_name"],
+                                "source_url": alert.get("url"),
+                                "source_external_id": alert["external_id"],
+                                "published_at": alert.get("published_at"),
+                            })
+                finally:
+                    research_db.close()
             for alert in alerts:
                 print(json.dumps(alert, ensure_ascii=False))
-            LOG.info("New contract-alert messages: %d", len(alerts))
+            LOG.info("New contract-alert messages: %d; unique contract addresses: %d",
+                     len(alerts), len({a for alert in alerts for a in alert["addresses"]}))
             if args.once:
                 break
             time.sleep(args.interval)
