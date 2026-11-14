@@ -18,7 +18,8 @@ def main() -> None:
     parser.add_argument("--created-block", required=True, type=int)
     parser.add_argument("--to-block", type=int, default=None)
     parser.add_argument("--chunk-size", type=int, default=2000)
-    parser.add_argument("--lockers-file", default=None, help="Optional bytecode-pinned V2 locker registry JSON")
+    parser.add_argument("--lockers-file", default=None,
+                        help="Optional bytecode-pinned V2 locker registry JSON")
     parser.add_argument("--rpc-url", default=os.getenv("ETHEREUM_RPC_URL"))
     args = parser.parse_args()
     if not args.rpc_url:
@@ -32,14 +33,26 @@ def main() -> None:
         w3, args.pair, args.created_block, to_block=args.to_block,
         chunk_size=args.chunk_size,
     )
+    adapters = load_v2_locker_registry(
+        args.lockers_file, int(w3.eth.chain_id), snapshot.token_address,
+        w3.to_checksum_address,
+    )
+    registry_complete = False
+    if args.lockers_file:
+        with open(args.lockers_file, encoding="utf-8") as registry_file:
+            registry_complete = bool(json.load(registry_file).get("coverage_complete", False))
+    locker_read = read_v2_locker_records(
+        w3, snapshot.token_address, snapshot.to_block, adapters,
+        registry_complete=registry_complete,
+    )
     holders = [
         LPHolder(row.address, row.balance_raw, row.role)
         for row in snapshot.holder_balances
     ]
     classification = classify_lp_supply(
-        snapshot.total_supply_raw, holders, [],
+        snapshot.total_supply_raw, holders, locker_read.locks,
         holders_complete=snapshot.complete,
-        locks_complete=False,
+        locks_complete=locker_read.complete,
         snapshot_timestamp=snapshot.block_timestamp,
     )
     print(json.dumps({
@@ -52,7 +65,8 @@ def main() -> None:
         "holder_count": snapshot.holder_count,
         "snapshot_complete": snapshot.complete,
         "lp_custody": classification.__dict__,
-        "holder_warnings": snapshot.warnings,\n        "locker_registry_warnings": locker_read.warnings,
+        "holder_warnings": snapshot.warnings,
+        "locker_registry_warnings": locker_read.warnings,
     }, ensure_ascii=False, indent=2))
 
 
