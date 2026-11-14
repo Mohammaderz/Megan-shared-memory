@@ -4,11 +4,11 @@ import megan_research as research
 
 
 def test_token_address_checks_base_then_quote():
-    quote = "0x" + "ab" * 20
+    base = "0x" + "ab" * 20
     assert research._token_address({
-        "base_token_id": "eth_0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        "quote_token_id": f"eth_{quote}",
-    }) == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "base_token_id": f"eth_{base}",
+        "quote_token_id": "eth_0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+    }) == base
 
 
 def test_tax_presence_does_not_claim_buy_simulation_succeeded(monkeypatch, tmp_path, capsys):
