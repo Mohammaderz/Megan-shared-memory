@@ -10,7 +10,7 @@ NOW = 1_800_000_000
 def test_verified_lock_and_eoa_balance_are_separated():
     result = classify_lp_supply(
         1000,
-        [LPHolder(LOCKER, 600, "contract"), LPHolder(EOA, 300, "eoa"),
+        [LPHolder(LOCKER, 500, "contract"), LPHolder(EOA, 400, "eoa"),
          LPHolder(BURN, 100, "burn")],
         [VerifiedLock(LOCKER, 500, NOW + 86400, True)],
         holders_complete=True, locks_complete=True, snapshot_timestamp=NOW,
