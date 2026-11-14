@@ -65,15 +65,32 @@ def _float(value: Any) -> float | None:
         return None
 
 
+_COMMON_QUOTE_TOKENS = {
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",  # WETH
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # USDC
+    "0xdac17f958d2ee523a2206206994597c13d831ec7",  # USDT
+    "0x6b175474e89094c44da98b954eedeac495271d0f",  # DAI
+    "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",  # WBTC
+}
+
+
 def _token_address(pool: dict[str, Any]) -> str | None:
-    """Return the token address only from a recognized GeckoTerminal token resource id."""
+    """Choose a non-major-quote asset from a GeckoTerminal pool; ambiguous pairs stay unknown."""
+    candidates: list[str] = []
     for key in ("base_token_id", "quote_token_id"):
         token_id = pool.get(key)
         if not isinstance(token_id, str) or "_" not in token_id:
             continue
         address = token_id.rsplit("_", 1)[-1]
         if len(address) == 42 and address.startswith("0x"):
-            return address
+            address = address.lower()
+            if address not in candidates:
+                candidates.append(address)
+    non_quote = [address for address in candidates if address not in _COMMON_QUOTE_TOKENS]
+    if len(non_quote) == 1:
+        return non_quote[0]
+    if len(candidates) == 1 and candidates[0] not in _COMMON_QUOTE_TOKENS:
+        return candidates[0]
     return None
 
 
