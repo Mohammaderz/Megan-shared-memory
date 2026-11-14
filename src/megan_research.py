@@ -108,12 +108,21 @@ def scan_once(db: ResearchDB) -> int:
         except SourceError as exc:
             LOG.warning("DEXScreener unavailable for %s: %s", address, exc)
 
-        metrics = (
-            extract_pool_metrics(
-                max(market_pairs, key=lambda p: _float((p.get("liquidity") or {}).get("usd")) or 0)
+        # Never substitute another pool for the exact pool discovered by GeckoTerminal.
+        # A token may have many pools with different liquidity, taxes and risk profiles.
+        discovered_pool = (pool.get("pool_address") or "").lower()
+        matching_pairs = [
+            pair for pair in market_pairs
+            if isinstance(pair.get("pairAddress"), str)
+            and pair["pairAddress"].lower() == discovered_pool
+        ] if discovered_pool else []
+        metrics = extract_pool_metrics(matching_pairs[0]) if matching_pairs else {}
+        if market_pairs and not matching_pairs:
+            LOG.warning(
+                "No exact DEXScreener pair match for token %s / pool %s; "
+                "leaving pool-specific market metrics unknown",
+                address, discovered_pool or "(missing address)"
             )
-            if market_pairs else {}
-        )
         evidence = RiskEvidence(
             liquidity_usd=metrics.get("liquidity_usd") or _float(pool.get("reserve_usd")),
             liquidity_lock_status="unknown",
