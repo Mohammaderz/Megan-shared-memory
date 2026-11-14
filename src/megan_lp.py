@@ -9,6 +9,7 @@ from web3 import Web3
 
 from holder_snapshot import fetch_erc20_holder_snapshot
 from lp_analysis import LPHolder, classify_lp_supply
+from v2_locker_registry import load_v2_locker_registry, read_v2_locker_records
 
 
 def main() -> None:
@@ -17,6 +18,7 @@ def main() -> None:
     parser.add_argument("--created-block", required=True, type=int)
     parser.add_argument("--to-block", type=int, default=None)
     parser.add_argument("--chunk-size", type=int, default=2000)
+    parser.add_argument("--lockers-file", default=None, help="Optional bytecode-pinned V2 locker registry JSON")
     parser.add_argument("--rpc-url", default=os.getenv("ETHEREUM_RPC_URL"))
     args = parser.parse_args()
     if not args.rpc_url:
@@ -50,7 +52,7 @@ def main() -> None:
         "holder_count": snapshot.holder_count,
         "snapshot_complete": snapshot.complete,
         "lp_custody": classification.__dict__,
-        "holder_warnings": snapshot.warnings,
+        "holder_warnings": snapshot.warnings,\n        "locker_registry_warnings": locker_read.warnings,
     }, ensure_ascii=False, indent=2))
 
 
