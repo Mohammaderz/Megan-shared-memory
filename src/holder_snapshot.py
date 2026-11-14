@@ -37,6 +37,7 @@ class HolderSnapshot:
     transfer_log_count: int
     complete: bool
     report: HolderReport
+    holder_balances: tuple[HolderBalance, ...]
     warnings: tuple[str, ...]
 
 
@@ -159,5 +160,6 @@ def fetch_erc20_holder_snapshot(
         warnings.extend(report.warnings)
     return HolderSnapshot(
         chain_id, token, deployment_block, end, block_hash, timestamp, supply,
-        len(rows), len(logs), complete, report, tuple(dict.fromkeys(warnings)),
+        len(rows), len(logs), complete, report, tuple(rows),
+        tuple(dict.fromkeys(warnings)),
     )
