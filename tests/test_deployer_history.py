@@ -75,3 +75,13 @@ def test_invalid_creator_address_rejected(tmp_path):
     make_db(path)
     with pytest.raises(ValueError, match="20-byte Ethereum address"):
         lookup_deployer_history(str(path), "not-an-address")
+
+def test_deployer_history_reports_truncation_and_full_observed_range(tmp_path):
+    path = tmp_path / "watcher.sqlite3"
+    make_db(path)
+    result = lookup_deployer_history(str(path), CREATOR, limit=1)
+    assert result.observed_deployment_count == 2
+    assert result.records_truncated is True
+    assert result.first_observed_block == 100
+    assert result.last_observed_block == 101
+    assert "deployment_record_list_truncated_by_limit" in result.warnings
