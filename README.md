@@ -29,6 +29,16 @@ python -m pytest -q
 megan-watch
 ```
 
+### snapshot هولدرهای ERC-20 از Ethereum
+
+برای استخراج آدرس‌های شرکت‌کننده در رویدادهای Transfer از بلاک استقرار تا بلاک snapshot، سپس خواندن balanceOf و تطبیق با totalSupply:
+
+```bash
+megan-holders --token 0xTOKEN_ADDRESS --deployment-block 19000000 --chunk-size 2000
+```
+
+RPC باید آرشیو لاگ‌های بازه موردنیاز را ارائه کند. خروجی فقط زمانی complete می‌شود که بلاک snapshot در طول خواندن reorg نشده باشد و مجموع balanceOfها دقیقاً با totalSupply برابر شود. این دستور فقط خواندنی است. آدرس‌های LP pair و locker تا زمان ارائه شواهد مستقل، به‌صورت خودکار مستثنا نمی‌شوند. برای توکن‌های rebase، reflection، یا توکن‌های غیر استاندارد، عدم تطبیق به UNKNOWN منجر می‌شود.
+
 ### اسکن منابع عمومی بازار
 بدون کلید خصوصی و بدون اتصال کیف‌پول:
 
