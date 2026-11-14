@@ -1,0 +1,9 @@
+[project]
+name = "megan-ai-worker"
+version = "0.1.0"
+description = "Read-only AI-agent bounty and paid-task discovery worker"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
