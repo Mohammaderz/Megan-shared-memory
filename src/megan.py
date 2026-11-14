@@ -27,10 +27,10 @@ def main() -> int:
             LOG.info("Starting %s", module)
             children.append(subprocess.Popen([sys.executable, "-m", module]))
         while not stopping:
-            failed = next((child for child in children if child.poll() not in (None, 0)), None)
-            if failed is not None:
-                LOG.error("A Megan worker exited with status %s", failed.returncode)
-                return int(failed.returncode or 1)
+            stopped = next((child for child in children if child.poll() is not None), None)
+            if stopped is not None:
+                LOG.error("A Megan worker exited with status %s", stopped.returncode)
+                return int(stopped.returncode or 1)
             time.sleep(1)
         return 0
     finally:
