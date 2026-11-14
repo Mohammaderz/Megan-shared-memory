@@ -123,8 +123,8 @@ def assess(e: RiskEvidence) -> RiskReport:
     # An unlocked LP is not automatically fraudulent, but it is a hard risk warning
     # and cannot be presented as a low-risk opportunity.
     if missing_critical:
-        opportunity = min(opportunity, 10 if len(missing_critical) < 5 else 3)
-    if len(missing_critical) >= 5: confidence = "low"
+        opportunity = min(opportunity, 10 if len(missing_critical) < 3 else 3)
+    if len(missing_critical) >= 3: confidence = "low"
     elif missing_critical: confidence = "medium"
     else: confidence = "high"
     level = "critical" if risk >= 75 else "high" if risk >= 50 else "medium" if risk >= 25 else "low"
