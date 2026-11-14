@@ -19,7 +19,7 @@ megan-research = "megan_research:main"
 pythonpath = ["src"]
 
 [tool.setuptools]
-py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research", "lp_analysis"]
+py-modules = ["megan_watcher", "trace_discovery", "risk_engine", "public_sources", "megan_research", "lp_analysis", "holder_analysis"]
 
 [tool.setuptools.package-dir]
 "" = "src"
