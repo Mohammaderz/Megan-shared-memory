@@ -59,8 +59,9 @@ def test_incomplete_holder_or_locker_data_returns_unknown():
     )
     assert incomplete_holders.status == "unknown"
     assert incomplete_holders.locked_share_pct is None
-    assert incomplete_locks.status == "unknown"
-    assert incomplete_locks.unlocked_share_pct is None
+    assert incomplete_locks.status == "unlocked"
+    assert incomplete_locks.unlocked_share_pct == 100
+    assert incomplete_locks.unknown_share_pct == 0
 
 
 def test_lock_amount_cannot_exceed_observed_locker_balance():
