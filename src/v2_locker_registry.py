@@ -14,6 +14,9 @@ from typing import Any
 
 from lp_analysis import VerifiedLock
 
+EIP1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+EIP1967_BEACON_SLOT = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50"
+
 
 @dataclass(frozen=True)
 class V2LockerAdapter:
@@ -87,9 +90,23 @@ def read_v2_locker_records(w3, pair_address: str, block_number: int,
         warnings.append("locker_registry_not_declared_complete")
     for adapter in adapters:
         code = bytes(w3.eth.get_code(adapter.address, block_identifier=block_number))
-        if not code or _hex(w3.keccak(code)).lower() != adapter.expected_code_hash:
+        if not code:
             complete = False
-            warnings.append(f"{adapter.address}:locker_code_hash_mismatch_or_missing")
+            warnings.append(f"{adapter.address}:locker_code_missing")
+            continue
+        proxy_detected = False
+        for slot in (EIP1967_IMPLEMENTATION_SLOT, EIP1967_BEACON_SLOT):
+            storage = bytes(w3.eth.get_storage_at(adapter.address, slot, block_identifier=block_number))
+            if len(storage) == 32 and int.from_bytes(storage[-20:], "big") != 0:
+                proxy_detected = True
+                break
+        if proxy_detected:
+            complete = False
+            warnings.append(f"{adapter.address}:eip1967_proxy_locker_not_supported")
+            continue
+        if _hex(w3.keccak(code)).lower() != adapter.expected_code_hash:
+            complete = False
+            warnings.append(f"{adapter.address}:locker_code_hash_mismatch")
             continue
         pair_word = bytes.fromhex(pair[2:]).rjust(32, bytes(1))
         try:
