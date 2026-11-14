@@ -135,7 +135,7 @@ def test_scan_once_searches_telegram_for_each_due_token(monkeypatch, capsys):
             pass
         def due_tokens(self, limit):
             return [
-                SimpleNamespace(address=address, observed_at="2026-11-14T00:00:00+00:00")
+                {"address": address, "observed_at": "2026-11-14T00:00:00+00:00"}
                 for address in addresses
             ][:limit]
         def save(self, address, observed_at, evidence):
