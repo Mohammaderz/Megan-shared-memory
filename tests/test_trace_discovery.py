@@ -36,3 +36,38 @@ def test_trace_normalizers_reject_unexpected_shapes():
         normalize_geth_block_trace({})
     with pytest.raises(ValueError):
         normalize_erigon_block_trace({})
+
+def test_auto_mode_falls_back_from_erigon_to_geth():
+    from types import SimpleNamespace
+    from trace_discovery import TraceDiscovery
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        def make_request(self, method, params):
+            self.calls.append(method)
+            if method == "trace_block":
+                return {"error": {"code": -32601, "message": "method not found"}}
+            return {"result": [{
+                "txHash": TX,
+                "result": {"type": "CREATE2", "from": CREATOR, "to": CREATED},
+            }]}
+
+    provider = Provider()
+    batch = TraceDiscovery(SimpleNamespace(provider=provider), "auto").trace_block(123)
+    assert provider.calls == ["trace_block", "debug_traceBlockByNumber"]
+    assert batch.provider == "geth_callTracer"
+    assert batch.creations[0].creation_method == "create2"
+
+
+def test_trace_mode_off_does_not_call_rpc():
+    from types import SimpleNamespace
+    from trace_discovery import TraceDiscovery
+
+    class Provider:
+        def make_request(self, method, params):
+            raise AssertionError("RPC must not be called in off mode")
+
+    batch = TraceDiscovery(SimpleNamespace(provider=Provider()), "off").trace_block(123)
+    assert batch.provider == "disabled"
+    assert batch.creations == ()
