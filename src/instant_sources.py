@@ -77,6 +77,24 @@ class AlertStore:
                 first_seen TEXT NOT NULL
             )
         """)
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS pending_tokens (
+                address TEXT PRIMARY KEY, first_seen TEXT NOT NULL, announced INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        self.db.commit()
+
+    def add_pending(self, address: str) -> None:
+        self.db.execute("INSERT OR IGNORE INTO pending_tokens(address,first_seen,announced) VALUES(?,?,0)",
+                        (address.lower(), utc_now()))
+        self.db.commit()
+
+    def pending(self) -> list[str]:
+        rows = self.db.execute("SELECT address FROM pending_tokens WHERE announced=0 ORDER BY first_seen").fetchall()
+        return [row[0] for row in rows]
+
+    def mark_announced(self, address: str) -> None:
+        self.db.execute("UPDATE pending_tokens SET announced=1 WHERE address=?", (address.lower(),))
         self.db.commit()
 
     def add(self, alert: SourceAlert) -> bool:
@@ -223,29 +241,23 @@ def main() -> int:
             alerts = poll_sources(store, rss, channels)
             # Hand fresh alert addresses straight to the research pipeline in this process.
             # A message may mention the same contract more than once; analyze it once per poll.
-            if alerts:
-                from megan_research import ResearchDB, analyze_token_address
-                research_db = ResearchDB(args.db)
-                analyzed: set[str] = set()
-                try:
-                    for alert in alerts:
-                        for address in alert["addresses"]:
-                            if address in analyzed:
-                                continue
-                            analyzed.add(address)
-                            analyze_token_address(research_db, address, {
-                                "source": alert["source_type"],
-                                "source_name": alert["source_name"],
-                                "source_url": alert.get("url"),
-                                "source_external_id": alert["external_id"],
-                                "published_at": alert.get("published_at"),
-                            })
-                finally:
-                    research_db.close()
             for alert in alerts:
-                print(json.dumps(alert, ensure_ascii=False))
-            LOG.info("New contract-alert messages: %d; unique contract addresses: %d",
-                     len(alerts), len({a for alert in alerts for a in alert["addresses"]}))
+                for address in alert["addresses"]:
+                    store.add_pending(address)
+            # Keep checking newly mentioned contracts until an Ethereum pool exceeds $100.
+            # Only qualifying candidates are emitted as token announcements.
+            from megan_research import ResearchDB, analyze_token_address
+            research_db = ResearchDB(args.db)
+            try:
+                for address in store.pending():
+                    result = analyze_token_address(research_db, address, {"source": "telegram_or_rss_alert"})
+                    if result.get("qualified") is True:
+                        store.mark_announced(address)
+                        LOG.info("QUALIFIED TOKEN: %s liquidity_usd=%s", address, result.get("metrics", {}).get("liquidity_usd"))
+            finally:
+                research_db.close()
+            LOG.info("New source messages: %d; pending contracts: %d",
+                     len(alerts), len(store.pending()))
             if args.once:
                 break
             time.sleep(args.interval)
