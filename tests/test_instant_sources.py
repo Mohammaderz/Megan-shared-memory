@@ -20,3 +20,16 @@ def test_alert_store_deduplicates_source_messages(tmp_path):
     assert store.add(alert) is True
     assert store.add(alert) is False
     store.close()
+
+
+def test_pending_token_is_rechecked_until_announced(tmp_path):
+    store = AlertStore(str(tmp_path / "alerts.sqlite3"))
+    try:
+        address = "0x" + "ab" * 20
+        store.add_pending(address)
+        store.add_pending(address)
+        assert store.pending() == [address]
+        store.mark_announced(address)
+        assert store.pending() == []
+    finally:
+        store.close()
