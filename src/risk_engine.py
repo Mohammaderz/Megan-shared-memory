@@ -117,6 +117,9 @@ def assess(e: RiskEvidence) -> RiskReport:
     critical = {"honeypot", "simulation_sell_ok", "lp_locked_share_pct", "liquidity_usd",
                 "top10_holder_share_pct", "owner_can_mint", "owner_can_blacklist"}
     missing_critical = critical.intersection(unknown)
+    # Missing critical safety evidence must materially cap opportunity ranking.
+    if missing_critical:
+        opportunity = min(opportunity, 15 if len(missing_critical) < 5 else 5)
     if len(missing_critical) >= 5: confidence = "low"
     elif missing_critical: confidence = "medium"
     else: confidence = "high"
