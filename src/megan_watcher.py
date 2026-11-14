@@ -445,12 +445,12 @@ def main() -> int:
     if not rpc_url:
         parser.error("Set ETHEREUM_RPC_URL in the environment or .env file")
     poll_seconds = float(os.getenv("POLL_SECONDS", "2"))
-    confirmations = int(os.getenv("CONFIRMATIONS", "2"))
+    confirmations = int(os.getenv("CONFIRMATIONS", "0"))
     db_path = os.getenv("DATABASE_PATH", "data/megan.sqlite3")
     v2_factories = env_addresses("V2_FACTORY_ADDRESSES")
     v3_factories = env_addresses("V3_FACTORY_ADDRESSES")
     trace_mode = os.getenv("TRACE_MODE", "auto").strip().lower()
-    trace_required = os.getenv("TRACE_REQUIRED", "false").strip().lower() in {"1", "true", "yes"}
+    trace_required = os.getenv("TRACE_REQUIRED", "true").strip().lower() in {"1", "true", "yes"}
 
     watcher = EthereumWatcher(rpc_url, db_path, poll_seconds, confirmations,
                               args.start_block, v2_factories, v3_factories, trace_mode, trace_required)

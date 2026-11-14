@@ -112,12 +112,20 @@ def assess(e: RiskEvidence) -> RiskReport:
         momentum += min(15, e.social_mentions_1h * 0.5) if e.social_sources >= 2 else min(4, e.social_mentions_1h * 0.2)
     if e.volume_liquidity_ratio_1h is not None:
         momentum += min(15, max(0, e.volume_liquidity_ratio_1h) * 5)
-    if e.liquidity_usd is not None and e.liquidity_usd >= 20_000: momentum += 10
+    # Liquidity is a quality/risk gate, not evidence of momentum by itself.
+    # A deep pool with no observed buyer, volume or social activity is not a signal.
     opportunity = max(0, min(100, round(momentum * (1 - risk / 100))))
-    critical = {"honeypot", "simulation_sell_ok", "lp_locked_share_pct", "liquidity_usd",
-                "top10_holder_share_pct", "owner_can_mint", "owner_can_blacklist"}
+    critical = {"honeypot", "simulation_sell_ok", "simulation_buy_ok",
+                "lp_locked_share_pct", "liquidity_usd", "top10_holder_share_pct",
+                "owner_can_mint", "owner_can_pause", "owner_can_blacklist",
+                "owner_can_change_tax", "proxy_upgradeable", "deployer_supply_share_pct",
+                "deployer_prior_rugs", "wash_trade_suspected"}
     missing_critical = critical.intersection(unknown)
-    if len(missing_critical) >= 5: confidence = "low"
+    # An unlocked LP is not automatically fraudulent, but it is a hard risk warning
+    # and cannot be presented as a low-risk opportunity.
+    if missing_critical:
+        opportunity = min(opportunity, 10 if len(missing_critical) < 3 else 3)
+    if len(missing_critical) >= 3: confidence = "low"
     elif missing_critical: confidence = "medium"
     else: confidence = "high"
     level = "critical" if risk >= 75 else "high" if risk >= 50 else "medium" if risk >= 25 else "low"

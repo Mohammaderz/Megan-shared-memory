@@ -1,0 +1,6 @@
+{
+  "chain_id": 1,
+  "pair_address": "0xYOUR_UNISWAP_V2_PAIR_ADDRESS",
+  "coverage_complete": false,
+  "lockers": []
+}

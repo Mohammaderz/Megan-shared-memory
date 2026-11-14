@@ -1,0 +1,158 @@
+from social_discovery import collect_social_evidence
+
+ADDRESS = "0x" + "ab" * 20
+
+
+def test_dexscreener_requires_exact_ethereum_contract_match():
+    profiles = [
+        {"chainId": "ethereum", "tokenAddress": ADDRESS,
+         "links": [{"type": "telegram", "url": "https://t.me/example_group"}]},
+        {"chainId": "base", "tokenAddress": ADDRESS,
+         "links": [{"type": "twitter", "url": "https://x.com/wrong_chain"}]},
+        {"chainId": "ethereum", "tokenAddress": "0x" + "cd" * 20,
+         "links": [{"type": "twitter", "url": "https://x.com/wrong_token"}]},
+    ]
+    result = collect_social_evidence(ADDRESS, profiles)
+    assert result["provider_profile_matches"] == 1
+    assert result["links"][0]["platform"] == "telegram"
+    assert result["links"][0]["source"] == "dexscreener"
+    assert result["links"][0]["official_verified"] is False
+
+
+def test_dextools_social_info_is_normalized():
+    result = collect_social_evidence(ADDRESS, dextools_token={
+        "socialInfo": {
+            "telegram": "https://t.me/token_group",
+            "twitter": "https://twitter.com/token_x",
+            "website": "https://token.example",
+        }
+    })
+    by_platform = {row["platform"]: row for row in result["links"]}
+    assert set(by_platform) == {"telegram", "x", "website"}
+    assert by_platform["x"]["source"] == "dextools"
+
+
+def test_x_mentions_must_contain_exact_contract_address():
+    posts = [
+        {"id": "123", "text": f"New token {ADDRESS}", "author_id": "7"},
+        {"id": "456", "text": "A different token"},
+        {"id": "789", "text": f"lowercase {ADDRESS.lower()}"},
+    ]
+    result = collect_social_evidence(ADDRESS, x_posts=posts)
+    assert [row["post_id"] for row in result["x_mentions"]] == ["123", "789"]
+
+
+def test_absence_of_social_links_is_not_a_safety_signal():
+    result = collect_social_evidence(ADDRESS, [], {}, [])
+    assert result["overall_status"] == "no_public_evidence_found"
+    assert result["telegram_status"] == "no_provider_link_found"
+    assert result["x_status"] == "searched_no_exact_mentions"
+
+
+def test_non_https_social_links_are_ignored():
+    result = collect_social_evidence(ADDRESS, [{
+        "chainId": "ethereum", "tokenAddress": ADDRESS,
+        "links": [{"type": "telegram", "url": "http://t.me/insecure"}],
+    }])
+    assert result["links"] == []
+
+
+
+def test_telegram_group_search_results_are_not_mistaken_for_official_links():
+    groups = [{
+        "chat_id": "42", "title": "Token discussion",
+        "username": "token_discussion",
+        "url": "https://t.me/token_discussion",
+        "source": "telegram_mtproto_groups_only",
+        "evidence": "exact_contract_address_mention",
+        "official_verified": False,
+    }]
+    result = collect_social_evidence(ADDRESS, telegram_groups=groups)
+    assert result["telegram_status"] == "group_found_by_account_search"
+    assert result["telegram_groups"][0]["url"] == "https://t.me/token_discussion"
+    assert result["overall_status"] == "evidence_found"
+
+
+
+def test_telegram_mtproto_search_uses_groups_only_and_returns_exact_mentions(monkeypatch):
+    import sys
+    from datetime import datetime, timezone
+    from types import ModuleType, SimpleNamespace
+
+    captured = {}
+    chat = SimpleNamespace(id=77, title="Launch group", username="launch_group", broadcast=False)
+    message = SimpleNamespace(
+        message=f"Contract: {ADDRESS}",
+        peer_id=SimpleNamespace(channel_id=77),
+        id=123,
+        date=datetime.now(timezone.utc),
+    )
+
+    class FakeClient:
+        def __init__(self, session, api_id, api_hash):
+            captured["session"] = session
+            captured["api_id"] = api_id
+        async def connect(self):
+            return None
+        async def is_user_authorized(self):
+            return True
+        async def __call__(self, request):
+            captured["request"] = request
+            return SimpleNamespace(chats=[chat], messages=[message])
+        async def disconnect(self):
+            return None
+
+    module = ModuleType("telethon")
+    module.TelegramClient = FakeClient
+    module.functions = SimpleNamespace(messages=SimpleNamespace(
+        SearchGlobalRequest=lambda **kwargs: kwargs
+    ))
+    module.types = SimpleNamespace(
+        InputMessagesFilterEmpty=lambda: object(),
+        InputPeerEmpty=lambda: object(),
+    )
+    monkeypatch.setitem(sys.modules, "telethon", module)
+
+    from social_discovery import search_telegram_groups
+    result = search_telegram_groups(ADDRESS, 1234, "api-hash", "data/test-session")
+
+    assert captured["request"]["groups_only"] is True
+    assert captured["session"] == "data/test-session"
+    assert result[0]["url"] == "https://t.me/launch_group"
+    assert result[0]["official_verified"] is False
+
+
+
+def test_scan_once_searches_telegram_for_each_due_token(monkeypatch, capsys):
+    from types import SimpleNamespace
+    import social_discovery
+
+    addresses = [ADDRESS, "0x" + "cd" * 20]
+    searched = []
+
+    class FakeStore:
+        def __init__(self, path):
+            pass
+        def due_tokens(self, limit):
+            return [
+                {"address": address, "observed_at": "2026-11-14T00:00:00+00:00"}
+                for address in addresses
+            ][:limit]
+        def save(self, address, observed_at, evidence):
+            pass
+        def close(self):
+            pass
+
+    monkeypatch.setattr(social_discovery, "SocialStore", FakeStore)
+    monkeypatch.setattr(social_discovery, "fetch_dexscreener_latest_profiles", lambda: [])
+    monkeypatch.setattr(social_discovery.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(social_discovery, "search_telegram_groups",
+                        lambda address, *args: searched.append(address) or [])
+    monkeypatch.setenv("TELEGRAM_API_ID", "1234")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "test-hash")
+    monkeypatch.setenv("TELEGRAM_SESSION_FILE", "data/test-session")
+    monkeypatch.delenv("DEXTOOLS_API_KEY", raising=False)
+    monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
+
+    assert social_discovery.scan_once("unused.sqlite", limit=10) == 2
+    assert searched == addresses
