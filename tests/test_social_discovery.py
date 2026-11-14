@@ -99,6 +99,16 @@ def test_telegram_mtproto_search_uses_groups_only_and_returns_exact_mentions(mon
         async def __call__(self, request):
             captured["request"] = request
             return SimpleNamespace(chats=[chat], messages=[message])
+        async def get_messages(self, chat, limit=100):
+            service = SimpleNamespace(
+                action=SimpleNamespace(users=[99]), id=124,
+                date=datetime.now(timezone.utc),
+            )
+            return [service]
+        async def get_entity(self, user_id):
+            return SimpleNamespace(id=user_id, username="helper_bot", bot=True)
+        async def get_participants(self, chat, limit=100):
+            return [SimpleNamespace(id=99, username="helper_bot", bot=True)]
         async def disconnect(self):
             return None
 
@@ -120,3 +130,5 @@ def test_telegram_mtproto_search_uses_groups_only_and_returns_exact_mentions(mon
     assert captured["session"] == "data/test-session"
     assert result[0]["url"] == "https://t.me/launch_group"
     assert result[0]["official_verified"] is False
+    assert result[0]["bot_added_events"][0]["username"] == "helper_bot"
+    assert result[0]["bot_accounts_observed"][0]["username"] == "helper_bot"
