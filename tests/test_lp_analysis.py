@@ -83,3 +83,17 @@ def test_unverified_lock_is_never_counted_as_locked():
     )
     assert result.status == "unknown"
     assert result.locked_share_pct is None
+
+def test_unknown_contract_custody_is_not_mislabeled_unlocked():
+    result = classify_lp_supply(
+        1000,
+        [LPHolder(LOCKER, 700, "contract"), LPHolder(EOA, 200, "eoa"),
+         LPHolder(BURN, 100, "burn")],
+        [],
+        holders_complete=True, locks_complete=False, snapshot_timestamp=NOW,
+    )
+    assert result.status == "unknown"
+    assert result.locked_share_pct == 0
+    assert result.unlocked_share_pct == 20
+    assert result.burned_share_pct == 10
+    assert result.unknown_share_pct == 70
