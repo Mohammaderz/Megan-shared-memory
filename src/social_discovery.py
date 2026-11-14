@@ -220,7 +220,7 @@ async def _telegram_search_async(address: str, api_id: int, api_hash: str,
             offset_peer=types.InputPeerEmpty(),
             offset_id=0,
             limit=limit,
-            groups_only=True,
+            groups_only=False,
         ))
         chats = {int(chat.id): chat for chat in (getattr(result, "chats", None) or [])}
         found: dict[int, dict[str, Any]] = {}
@@ -233,7 +233,7 @@ async def _telegram_search_async(address: str, api_id: int, api_hash: str,
             if peer_id is None:
                 continue
             chat = chats.get(int(peer_id))
-            if chat is None or bool(getattr(chat, "broadcast", False)):
+            if chat is None:
                 continue
             chat_id = int(chat.id)
             username = getattr(chat, "username", None)
@@ -283,6 +283,7 @@ async def _telegram_search_async(address: str, api_id: int, api_hash: str,
             found.setdefault(chat_id, {
                 "chat_id": str(chat_id),
                 "title": getattr(chat, "title", None),
+                "chat_type": "channel" if bool(getattr(chat, "broadcast", False)) else "group",
                 "username": username,
                 "url": f"https://t.me/{username}" if username else None,
                 "message_id": int(getattr(message, "id", 0)),
