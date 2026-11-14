@@ -220,7 +220,7 @@ async def _telegram_search_async(address: str, api_id: int, api_hash: str,
             offset_peer=types.InputPeerEmpty(),
             offset_id=0,
             limit=limit,
-            groups_only=True,
+            groups_only=False,
         ))
         chats = {int(chat.id): chat for chat in (getattr(result, "chats", None) or [])}
         found: dict[int, dict[str, Any]] = {}
@@ -233,13 +233,57 @@ async def _telegram_search_async(address: str, api_id: int, api_hash: str,
             if peer_id is None:
                 continue
             chat = chats.get(int(peer_id))
-            if chat is None or bool(getattr(chat, "broadcast", False)):
+            if chat is None:
                 continue
             chat_id = int(chat.id)
             username = getattr(chat, "username", None)
+            bot_added_events = []
+            group_created_event = None
+            bot_accounts = []
+            # Service messages in the matched group can expose bot-add and group-create events.
+            try:
+                recent_messages = await client.get_messages(chat, limit=100)
+                for service_message in recent_messages:
+                    action = getattr(service_message, "action", None)
+                    if action is None:
+                        continue
+                    action_name = type(action).__name__
+                    if "ChatCreate" in action_name or "ChannelCreate" in action_name:
+                        group_created_event = {
+                            "action": action_name,
+                            "message_id": int(getattr(service_message, "id", 0)),
+                            "date": getattr(service_message, "date", None).isoformat()
+                                if getattr(service_message, "date", None) else None,
+                        }
+                    for user_id in (getattr(action, "users", None) or []):
+                        try:
+                            added_user = await client.get_entity(int(user_id))
+                        except Exception:
+                            continue
+                        if bool(getattr(added_user, "bot", False)):
+                            bot_added_events.append({
+                                "user_id": str(getattr(added_user, "id", user_id)),
+                                "username": getattr(added_user, "username", None),
+                                "message_id": int(getattr(service_message, "id", 0)),
+                                "date": getattr(service_message, "date", None).isoformat()
+                                    if getattr(service_message, "date", None) else None,
+                            })
+            except Exception:
+                # A public search hit does not guarantee permission to inspect group history.
+                pass
+            try:
+                participants = await client.get_participants(chat, limit=100)
+                bot_accounts = [
+                    {"user_id": str(getattr(user, "id", "")),
+                     "username": getattr(user, "username", None)}
+                    for user in participants if bool(getattr(user, "bot", False))
+                ]
+            except Exception:
+                pass
             found.setdefault(chat_id, {
                 "chat_id": str(chat_id),
                 "title": getattr(chat, "title", None),
+                "chat_type": "channel" if bool(getattr(chat, "broadcast", False)) else "group",
                 "username": username,
                 "url": f"https://t.me/{username}" if username else None,
                 "message_id": int(getattr(message, "id", 0)),
@@ -250,6 +294,12 @@ async def _telegram_search_async(address: str, api_id: int, api_hash: str,
                 "evidence": "exact_contract_address_mention",
                 "official_verified": False,
                 "public_username": bool(username),
+                "created_at": getattr(chat, "date", None).isoformat()
+                    if getattr(chat, "date", None) else None,
+                "group_created_event": group_created_event,
+                "bot_added_events": bot_added_events,
+                "bot_accounts_observed": bot_accounts,
+                "bot_scan_limit": 100,
             })
         return list(found.values())
     finally:
@@ -333,7 +383,6 @@ def scan_once(database_path: str, limit: int = 20) -> int:
         tg_api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
         tg_session = os.getenv("TELEGRAM_SESSION_FILE", "data/telegram_user").strip()
         tg_session_exists = Path(tg_session + ".session").is_file()
-        tg_searched_this_cycle = False
         count = 0
         for row in due:
             address = str(row["address"])
@@ -350,8 +399,7 @@ def scan_once(database_path: str, limit: int = 20) -> int:
                     x_posts = fetch_x_recent_posts(address, x_token)
                 except SocialSourceError as exc:
                     LOG.warning("X search failed for %s: %s", address, exc)
-            if tg_api_id > 0 and tg_api_hash and tg_session_exists and not tg_searched_this_cycle:
-                tg_searched_this_cycle = True
+            if tg_api_id > 0 and tg_api_hash and tg_session_exists:
                 try:
                     telegram_groups = search_telegram_groups(address, tg_api_id, tg_api_hash, tg_session)
                 except Exception as exc:

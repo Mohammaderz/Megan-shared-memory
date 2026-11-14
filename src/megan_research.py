@@ -119,6 +119,14 @@ def scan_once(db: ResearchDB) -> int:
             and pair["pairAddress"].lower() == discovered_pool
         ] if discovered_pool else []
         metrics = extract_pool_metrics(matching_pairs[0]) if matching_pairs else {}
+        observed_liquidity = _float(metrics.get("liquidity_usd"))
+        if observed_liquidity is None:
+            observed_liquidity = _float(pool.get("reserve_usd"))
+        # Announce only after a real Ethereum pool is observed with strictly more than $100.
+        # LP lock/burn status is intentionally irrelevant to this early alert gate.
+        if not pool.get("pool_address") or observed_liquidity is None or observed_liquidity <= 100.0:
+            LOG.debug("Below announcement threshold: %s liquidity=%s", address, observed_liquidity)
+            continue
         if market_pairs and not matching_pairs:
             LOG.warning(
                 "No exact DEXScreener pair match for token %s / pool %s; "

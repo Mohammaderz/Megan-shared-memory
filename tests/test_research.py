@@ -80,3 +80,40 @@ def test_scan_uses_exact_discovered_pool_not_largest_other_pool(monkeypatch, tmp
     finally:
         db.close()
     assert json.loads(row[0])["liquidity_usd"] == 12000
+
+
+def test_pool_with_more_than_100_usd_is_announced_even_without_lp_lock_data(monkeypatch, tmp_path, capsys):
+    token = "0x" + "aa" * 20
+    monkeypatch.setattr(research, "geckoterminal_new_pools", lambda: [{
+        "base_token_id": f"eth_{token}", "quote_token_id": None,
+        "pool_address": "0x" + "bb" * 20, "reserve_usd": "100.01",
+    }])
+    monkeypatch.setattr(research, "dexscreener_token_pairs", lambda _address: [])
+    monkeypatch.setattr(research, "honeypot_check", lambda _address: {})
+    db = research.ResearchDB(str(tmp_path / "above-threshold.sqlite3"))
+    try:
+        assert research.scan_once(db) == 1
+        row = db.db.execute(
+            "SELECT liquidity_usd FROM candidates WHERE token_address=?", (token,)
+        ).fetchone()
+        assert row[0] == 100.01
+    finally:
+        db.close()
+
+
+def test_pool_at_exactly_100_usd_is_not_announced(monkeypatch, tmp_path, capsys):
+    token = "0x" + "cc" * 20
+    monkeypatch.setattr(research, "geckoterminal_new_pools", lambda: [{
+        "base_token_id": f"eth_{token}", "quote_token_id": None,
+        "pool_address": "0x" + "dd" * 20, "reserve_usd": "100",
+    }])
+    monkeypatch.setattr(research, "dexscreener_token_pairs", lambda _address: [])
+    db = research.ResearchDB(str(tmp_path / "at-threshold.sqlite3"))
+    try:
+        assert research.scan_once(db) == 0
+        row = db.db.execute(
+            "SELECT token_address FROM candidates WHERE token_address=?", (token,)
+        ).fetchone()
+        assert row is None
+    finally:
+        db.close()
