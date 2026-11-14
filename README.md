@@ -6,6 +6,7 @@
 - [کشف قراردادها و استخرها](src/megan_watcher.py): اسکن بلوک، CREATE مستقیم، CREATE/CREATE2 داخلی از طریق trace و رویدادهای factoryهای V2/V3 که پیکربندی شده باشند.
 - [اتصال منابع عمومی بازار](src/public_sources.py): GeckoTerminal، DEX Screener و Honeypot.is.
 - [موتور ارزیابی ریسک](src/risk_engine.py): امتیاز ریسک و فرصت، موانع سخت، هشدارها و داده‌های نامعلوم.
+- [تحلیل وضعیت LP](src/lp_analysis.py): تفکیک توکن‌های LP قفل‌شده، آزاد، سوزانده‌شده و نگهداری‌شده در قراردادهای ناشناخته؛ فقط با snapshot کامل و lock record تأییدشده. این ماژول فعلاً تحلیل‌گر داده ورودی است و هنوز به RPC/locker registry متصل نشده است.
 - [اسکنر پژوهش](src/megan_research.py): کشف استخرهای تازه Ethereum، دریافت داده‌های بازار و ذخیره گزارش در SQLite.
 - [آزمون‌ها](tests/) و [GitHub Actions](.github/workflows/python-tests.yml).
 
