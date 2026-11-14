@@ -33,6 +33,7 @@ def test_contract_custody_without_verified_lock_is_unknown_not_unlocked():
     assert result.locked_share_pct == 0
     assert result.unlocked_share_pct == 30
     assert result.unknown_share_pct == 70
+    assert "locker_registry_incomplete" in result.warnings
 
 
 def test_expired_lock_is_unlocked():
