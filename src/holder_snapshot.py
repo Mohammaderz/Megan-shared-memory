@@ -124,6 +124,8 @@ def fetch_erc20_holder_snapshot(
     rows: list[HolderBalance] = []
     for address in sorted(participants):
         balance = int(contract.functions.balanceOf(address).call(block_identifier=end))
+        if balance == 0:
+            continue
         lower = address.lower()
         if lower in burn_addresses:
             role = "burn"
