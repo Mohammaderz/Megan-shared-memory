@@ -236,37 +236,36 @@ class EthereumWatcher:
 
     def inspect_token(self, address: str, creator: str | None, tx_hash: str,
                       block_number: int, block_hash: str) -> TokenRecord | None:
-        try:
-            bytecode = bytes(self.w3.eth.get_code(address, block_identifier=block_number))
-            if not bytecode:
-                return None
-            values: dict[str, Any] = {}
-            for key in ("name", "symbol", "decimals", "total_supply", "owner"):
-                try:
-                    raw = self.call(address, SELECTORS[key], block_number)
-                    if key in ("name", "symbol"):
-                        values[key] = decode_text(raw)
-                    elif key == "owner":
-                        values[key] = Web3.to_checksum_address("0x" + raw[-20:].hex()) if len(raw) >= 32 else None
-                    else:
-                        values[key] = decode_uint(raw)
-                except Exception:
-                    values[key] = None
-            # ERC-20-like heuristic: at least two identity/quantity methods must respond.
-            evidence_count = sum(values.get(k) is not None for k in ("name", "symbol", "decimals", "total_supply"))
-            if evidence_count < 2:
-                return None
-            return TokenRecord(
-                address=Web3.to_checksum_address(address), creator=creator, creation_tx=tx_hash,
-                block_number=block_number, block_hash=block_hash, observed_at=utc_now(),
-                name=values.get("name"), symbol=values.get("symbol"),
-                decimals=values.get("decimals"), total_supply_raw=str(values["total_supply"]) if values.get("total_supply") is not None else None,
-                owner=values.get("owner"), bytecode_bytes=len(bytecode),
-                metadata_complete=all(values.get(k) is not None for k in ("name", "symbol", "decimals", "total_supply")),
-            )
-        except Exception:
-            LOG.exception("Token inspection failed for %s", address)
+        # Infrastructure failures here must escape to the block loop. Treating an
+        # RPC outage as "not a token" would silently advance an incomplete scan.
+        bytecode = bytes(self.w3.eth.get_code(address, block_identifier=block_number))
+        if not bytecode:
             return None
+        values: dict[str, Any] = {}
+        for key in ("name", "symbol", "decimals", "total_supply", "owner"):
+            try:
+                raw = self.call(address, SELECTORS[key], block_number)
+                if key in ("name", "symbol"):
+                    values[key] = decode_text(raw)
+                elif key == "owner":
+                    values[key] = Web3.to_checksum_address("0x" + raw[-20:].hex()) if len(raw) >= 32 else None
+                else:
+                    values[key] = decode_uint(raw)
+            except Exception:
+                # Individual metadata methods may legitimately be absent/revert.
+                values[key] = None
+        # ERC-20-like heuristic: at least two identity/quantity methods must respond.
+        evidence_count = sum(values.get(k) is not None for k in ("name", "symbol", "decimals", "total_supply"))
+        if evidence_count < 2:
+            return None
+        return TokenRecord(
+            address=Web3.to_checksum_address(address), creator=creator, creation_tx=tx_hash,
+            block_number=block_number, block_hash=block_hash, observed_at=utc_now(),
+            name=values.get("name"), symbol=values.get("symbol"),
+            decimals=values.get("decimals"), total_supply_raw=str(values["total_supply"]) if values.get("total_supply") is not None else None,
+            owner=values.get("owner"), bytecode_bytes=len(bytecode),
+            metadata_complete=all(values.get(k) is not None for k in ("name", "symbol", "decimals", "total_supply")),
+        )
 
     def scan_deployments(self, block: Any) -> int:
         discovered = 0
