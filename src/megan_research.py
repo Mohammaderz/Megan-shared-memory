@@ -99,9 +99,13 @@ def analyze_token_address(db: ResearchDB, address: str,
         selected = max(pairs, key=lambda p: _float((p.get("liquidity") or {}).get("usd")) or 0)
     metrics = extract_pool_metrics(selected) if selected else {}
     liquidity_usd = _float(metrics.get("liquidity_usd"))
+    if liquidity_usd is None:
+        liquidity_usd = _float(pool.get("reserve_usd"))
     # Announcement gate: require a live Ethereum pool with strictly more than $100 liquidity.
+    # A GeckoTerminal new-pool record is also a valid pool observation when it has an address.
     # LP lock/burn state is deliberately not part of this gate.
-    qualified = bool(selected and liquidity_usd is not None and liquidity_usd > 100.0)
+    has_pool = bool(selected or pool.get("pool_address"))
+    qualified = bool(has_pool and liquidity_usd is not None and liquidity_usd > 100.0)
     if not qualified:
         return {"token": address, "qualified": False, "reason": "no_ethereum_pool_over_100_usd",
                 "liquidity_usd": liquidity_usd, "source": context}
