@@ -333,7 +333,6 @@ def scan_once(database_path: str, limit: int = 20) -> int:
         tg_api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
         tg_session = os.getenv("TELEGRAM_SESSION_FILE", "data/telegram_user").strip()
         tg_session_exists = Path(tg_session + ".session").is_file()
-        tg_searched_this_cycle = False
         count = 0
         for row in due:
             address = str(row["address"])
@@ -350,8 +349,9 @@ def scan_once(database_path: str, limit: int = 20) -> int:
                     x_posts = fetch_x_recent_posts(address, x_token)
                 except SocialSourceError as exc:
                     LOG.warning("X search failed for %s: %s", address, exc)
-            if tg_api_id > 0 and tg_api_hash and tg_session_exists and not tg_searched_this_cycle:
-                tg_searched_this_cycle = True
+            # Search Telegram for every due token. A cycle-level flag here silently
+            # skipped all but the first token, leaving later reports without Telegram evidence.
+            if tg_api_id > 0 and tg_api_hash and tg_session_exists:
                 try:
                     telegram_groups = search_telegram_groups(address, tg_api_id, tg_api_hash, tg_session)
                 except Exception as exc:
