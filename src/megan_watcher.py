@@ -324,7 +324,7 @@ class EthereumWatcher:
                 token = self.inspect_token(address, tx.get("from"), tx_hash, block["number"], block["hash"].hex())
                 if token and self.store.add_token(token):
                     discovered += 1
-                    LOG.info("NEW TOKEN %s (%s) at block %s", token.address, token.symbol or "?", block["number"])
+                    LOG.debug("Observed ERC-20-like contract %s (%s) at block %s; waiting for >$100 pool liquidity", token.address, token.symbol or "?", block["number"])
                     self.store.add_event(block["number"], block["hash"].hex(), tx_hash, None,
                                          "token_discovered", asdict(token), utc_now())
             except Exception:
@@ -357,8 +357,8 @@ class EthereumWatcher:
                 added += 1
             token = self.inspect_token(address, creator, creation.tx_hash, block_number, block_hash)
             if token and self.store.add_token(token):
-                LOG.info("NEW TRACED TOKEN %s (%s) via %s at block %s",
-                         token.address, token.symbol or "?", creation.creation_method, block_number)
+                LOG.debug("Observed traced ERC-20-like contract %s (%s) via %s at block %s; waiting for >$100 pool liquidity",
+                          token.address, token.symbol or "?", creation.creation_method, block_number)
                 self.store.add_event(block_number, block_hash, creation.tx_hash, None,
                                      "token_discovered_trace", asdict(token), utc_now())
         self.store.set_trace_coverage(block_number, block_hash, "complete", batch.provider, None)
